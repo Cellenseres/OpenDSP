@@ -1,0 +1,13 @@
+diff --git a/clang/lib/Basic/Targets/Teak.h b/clang/lib/Basic/Targets/Teak.h
+index fa0f197d5f5..d918e2de98b 100644
+--- a/clang/lib/Basic/Targets/Teak.h
++++ b/clang/lib/Basic/Targets/Teak.h
+@@ -36,6 +36,8 @@ public:
+     BoolWidth = 16;
+     BoolAlign = 16;
+     MinGlobalAlign = 16;
++    // 16-bit data pointers, as in the data layout.
++    PointerWidth = PointerAlign = 16;
+     resetDataLayout("E-m:e-P1-p0:16:16:16-p1:32:32:32-i1:16:16-i8:16:16-i16:16:16-i32:32:32-a:0:32-n16:40");
+   }
+ 
