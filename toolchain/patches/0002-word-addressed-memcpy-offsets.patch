@@ -1,0 +1,70 @@
+diff --git a/llvm/lib/CodeGen/SelectionDAG/SelectionDAG.cpp b/llvm/lib/CodeGen/SelectionDAG/SelectionDAG.cpp
+index bead4adb68d..84873f82ab9 100644
+--- a/llvm/lib/CodeGen/SelectionDAG/SelectionDAG.cpp
++++ b/llvm/lib/CodeGen/SelectionDAG/SelectionDAG.cpp
+@@ -5866,6 +5866,13 @@ static void chainLoadsAndStoresForMemcpy(SelectionDAG &DAG, const SDLoc &dl,
+   }
+ }
+ 
++/// Byte offset to address offset (word-addressed targets).
++static int64_t memAddrOffset(SelectionDAG &DAG, uint64_t ByteOff) {
++  if (DAG.getTarget().getTargetTriple().getArch() == Triple::teak)
++    return ByteOff >> 1;
++  return ByteOff;
++}
++
+ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
+                                        SDValue Chain, SDValue Dst, SDValue Src,
+                                        uint64_t Size, unsigned Alignment,
+@@ -5968,7 +5975,7 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
+       Value = getMemsetStringVal(VT, dl, DAG, TLI, SubSlice);
+       if (Value.getNode()) {
+         Store = DAG.getStore(
+-            Chain, dl, Value, DAG.getMemBasePlusOffset(Dst, DstOff, dl),
++            Chain, dl, Value, DAG.getMemBasePlusOffset(Dst, memAddrOffset(DAG, DstOff), dl),
+             DstPtrInfo.getWithOffset(DstOff), Alignment, MMOFlags);
+         OutChains.push_back(Store);
+       }
+@@ -5990,13 +5997,13 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
+         SrcMMOFlags |= MachineMemOperand::MODereferenceable;
+ 
+       Value = DAG.getExtLoad(ISD::EXTLOAD, dl, NVT, Chain,
+-                             DAG.getMemBasePlusOffset(Src, SrcOff, dl),
++                             DAG.getMemBasePlusOffset(Src, memAddrOffset(DAG, SrcOff), dl),
+                              SrcPtrInfo.getWithOffset(SrcOff), VT,
+                              MinAlign(SrcAlign, SrcOff), SrcMMOFlags);
+       OutLoadChains.push_back(Value.getValue(1));
+ 
+       Store = DAG.getTruncStore(
+-          Chain, dl, Value, DAG.getMemBasePlusOffset(Dst, DstOff, dl),
++          Chain, dl, Value, DAG.getMemBasePlusOffset(Dst, memAddrOffset(DAG, DstOff), dl),
+           DstPtrInfo.getWithOffset(DstOff), VT, Alignment, MMOFlags);
+       OutStoreChains.push_back(Store);
+     }
+@@ -6120,7 +6127,7 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
+       SrcMMOFlags |= MachineMemOperand::MODereferenceable;
+ 
+     Value =
+-        DAG.getLoad(VT, dl, Chain, DAG.getMemBasePlusOffset(Src, SrcOff, dl),
++        DAG.getLoad(VT, dl, Chain, DAG.getMemBasePlusOffset(Src, memAddrOffset(DAG, SrcOff), dl),
+                     SrcPtrInfo.getWithOffset(SrcOff), SrcAlign, SrcMMOFlags);
+     LoadValues.push_back(Value);
+     LoadChains.push_back(Value.getValue(1));
+@@ -6134,7 +6141,7 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
+     SDValue Store;
+ 
+     Store = DAG.getStore(Chain, dl, LoadValues[i],
+-                         DAG.getMemBasePlusOffset(Dst, DstOff, dl),
++                         DAG.getMemBasePlusOffset(Dst, memAddrOffset(DAG, DstOff), dl),
+                          DstPtrInfo.getWithOffset(DstOff), Align, MMOFlags);
+     OutChains.push_back(Store);
+     DstOff += VTSize;
+@@ -6235,7 +6242,7 @@ static SDValue getMemsetStores(SelectionDAG &DAG, const SDLoc &dl,
+     }
+     assert(Value.getValueType() == VT && "Value with wrong type.");
+     SDValue Store = DAG.getStore(
+-        Chain, dl, Value, DAG.getMemBasePlusOffset(Dst, DstOff, dl),
++        Chain, dl, Value, DAG.getMemBasePlusOffset(Dst, memAddrOffset(DAG, DstOff), dl),
+         DstPtrInfo.getWithOffset(DstOff), Align,
+         isVol ? MachineMemOperand::MOVolatile : MachineMemOperand::MONone);
+     OutChains.push_back(Store);

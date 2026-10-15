@@ -1,0 +1,11 @@
+firmware/*.o
+firmware/*.elf
+library/build/
+library/lib/
+examples/soundlab/build/
+examples/soundlab/*.3dsx
+examples/soundlab/*.cia
+examples/soundlab/*.elf
+examples/soundlab/*.smdh
+examples/soundlab/*.map
+toolchain/teak-llvm/
