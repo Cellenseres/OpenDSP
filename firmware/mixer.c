@@ -5,6 +5,7 @@
 #include "source.h"
 #include "dma.h"
 #include "extension.h"
+#include "reverb.h"
 #include "surround.h"
 #include "output.h"
 
@@ -75,6 +76,7 @@ void mixer_init(void)
         aux_bypass[b] = 0;
         delays[b].enabled = 0;
     }
+    reverb_init();
     surround_init();
     output_format = 1;
     rear_mode = 0;
@@ -88,9 +90,9 @@ u16 mixer_route(u16 mix)
     if (!mix)
         return 0;
     b = mix - 1;
-    if ((aux_enabled[b] && !aux_bypass[b]) || delays[b].enabled)
+    if ((aux_enabled[b] && !aux_bypass[b]) || delays[b].enabled || reverb_enabled(b))
         route |= 1;
-    if (aux_enabled[b] || delays[b].enabled)
+    if (aux_enabled[b] || delays[b].enabled || reverb_enabled(b))
         route |= 2;
     return route;
 }
@@ -362,6 +364,8 @@ void mixer_end(u16 read_bank, u16 write_bank, vu16 *out)
         }
         if (delays[b].enabled)
             run_delay(&delays[b], quad);
+        if (reverb_enabled(b))
+            reverb_run(b, quad);
         return_job[0] = (u16)(unsigned)(quad[0] ? quad[0] : zero_bus);
         return_job[1] = (u16)(unsigned)(quad[1] ? quad[1] : zero_bus);
         return_job[2] = (u16)(unsigned)quad[2];
