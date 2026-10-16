@@ -89,13 +89,14 @@ int2_vec:
     reti    always
 
 // Save caller-saved state, call the C handler.
-// Not saved: stt2 (ends block loops), p0/p1 (unused).
+// Not saved: stt2 (ends block loops), p0/p1. The handlers must not use
+// block repeat; kernels without the multiplier run with interrupts on.
 int0_vec:
     push    stt0
     push    stt1
     push    mod0
     set     0x0001, mod0            // pusha without saturation
-    rst     0x0080, mod0            // arithmetic shifts
+    rst     0x0c80, mod0            // arithmetic shifts, product shift 0
     push    a0e
     pusha   a0
     push    a1e
@@ -124,7 +125,7 @@ int1_vec:
     push    stt1
     push    mod0
     set     0x0001, mod0
-    rst     0x0080, mod0
+    rst     0x0c80, mod0
     push    a0e
     pusha   a0
     push    a1e
