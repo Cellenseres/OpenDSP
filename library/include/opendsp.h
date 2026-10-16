@@ -44,6 +44,22 @@ Result opendspGetCapabilities(u32 *caps);
 // Firmware version, major << 8 | minor.
 Result opendspGetFirmwareVersion(u16 *version);
 
+typedef struct {
+    u32 struct_size;     // sizeof(opendspStats)
+    u32 frames;          // frames rendered since init
+    u32 late_frames;     // rendered while the next one was already due
+    u32 max_backlog;     // most frames due at once
+    u32 fifo_empty;      // output FIFO found empty on refill
+    float load;          // last frame, share of the frame time
+    float load_max;      // peak since the last reset
+    u32 frame_ticks;     // last frame period in DSP timer ticks
+    u32 frame_ticks_min; // since the last reset; these differ when
+    u32 frame_ticks_max; // the output drains unevenly
+} opendspStats;
+
+// DSP timing. reset clears the peaks after reading them.
+Result opendspGetStats(opendspStats *stats, bool reset);
+
 #ifdef __cplusplus
 }
 #endif
