@@ -5,6 +5,7 @@
 #include "output.h"
 #include "source.h"
 #include "dma.h"
+#include "mailbox.h"
 #include "stats.h"
 
 #define PIPE_TABLE 0x0800
@@ -321,12 +322,14 @@ int main(void)
 {
     state = STATE_OFF;
     stats_init();
+    mailbox_init();
     pipes_init();
     send_pipe_table();
     select_bank(0);
     output_start();
     for (;;) {
         ipc_poll();
+        mailbox_poll();
         output_poll();
         if (frames_due) {
             irq_disable();
