@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // BTDMP0 output from a double buffer.
 #include "output.h"
+#include "stats.h"
 
 volatile u16 frames_due;
 volatile u16 render_buffer;
@@ -12,10 +13,14 @@ vu16 *output_buffer(u16 index)
     return (vu16 *)(index ? OUTPUT_BUFFERS + 2 * FRAME_SAMPLES : OUTPUT_BUFFERS);
 }
 
+#define BTDMP_TX_EMPTY (1u << 4)
+
 static void fill_fifo(void)
 {
     vu16 *buf = output_buffer(play_buffer);
     u16 pos = play_position;
+    if (BTDMP0_TX_STAT & BTDMP_TX_EMPTY)
+        stats.fifo_empty++;
     while (!(BTDMP0_TX_STAT & BTDMP_TX_FULL)) {
         BTDMP0_TX_FIFO = buf[pos];
         if (++pos == 2 * FRAME_SAMPLES) {
@@ -29,6 +34,7 @@ static void fill_fifo(void)
     play_position = pos;
 }
 
+// no block repeat here (see crt0.s)
 void isr_int0(void)
 {
     ICU_ACK = IRQ_BTDMP0;

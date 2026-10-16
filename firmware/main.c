@@ -5,6 +5,7 @@
 #include "output.h"
 #include "source.h"
 #include "dma.h"
+#include "stats.h"
 
 #define PIPE_TABLE 0x0800
 #define PIPE_BUFFERS 0x0900
@@ -319,6 +320,7 @@ static void render_frame(void)
 int main(void)
 {
     state = STATE_OFF;
+    stats_init();
     pipes_init();
     send_pipe_table();
     select_bank(0);
@@ -330,7 +332,9 @@ int main(void)
             irq_disable();
             frames_due--;
             irq_enable();
+            stats_frame_begin(frames_due);
             render_frame();
+            stats_frame_end();
         }
     }
 }
