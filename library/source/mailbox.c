@@ -116,3 +116,28 @@ Result opendspGetFirmwareVersion(u16 *version)
     LightLock_Unlock(&lock);
     return box ? 0 : OPENDSP_ERR_NOT_OPENDSP;
 }
+
+Result opendspGetStats(opendspStats *stats, bool reset)
+{
+    u16 args[1] = {reset ? 1 : 0}, r[15];
+    u32 render, render_max, period;
+    Result rc;
+    if (!stats || stats->struct_size != sizeof(*stats))
+        return OPENDSP_ERR_ARGUMENT;
+    rc = opendsp_request(EXT_CMD_STATS, args, 1, r, 15);
+    if (R_FAILED(rc))
+        return rc;
+    stats->frames = ((u32)r[0] << 16) | r[1];
+    stats->late_frames = r[2];
+    stats->max_backlog = r[3];
+    stats->fifo_empty = r[4];
+    render = ((u32)r[5] << 16) | r[6];
+    render_max = ((u32)r[7] << 16) | r[8];
+    period = ((u32)r[9] << 16) | r[10];
+    stats->load = period ? (float)render / period : 0;
+    stats->load_max = period ? (float)render_max / period : 0;
+    stats->frame_ticks = period;
+    stats->frame_ticks_min = ((u32)r[11] << 16) | r[12];
+    stats->frame_ticks_max = ((u32)r[13] << 16) | r[14];
+    return 0;
+}
