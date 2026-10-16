@@ -116,6 +116,8 @@ void sources_init(void)
 
 static void read_u32(vu16 *p, u32 *out) { *out = ((u32)p[0] << 16) | p[1]; }
 
+void sources_routing_changed(void) { gains_stale = 1; }
+
 static void parse_gains(u16 i, vu16 *config)
 {
     u16 mix, ch;
@@ -131,30 +133,52 @@ static void update_gains(u16 i)
 {
     source_mix_t *m = &mixes[i];
     s32 l = 0, r = 0;
-    u16 mix, bus;
+    u16 mix, bus, rear_mode = mixer_rear_mode();
     for (bus = 0; bus < NUM_BUSES; bus++)
         m->bus_gain[bus][0] = m->bus_gain[bus][1] = 0;
     for (mix = 0; mix < 3; mix++) {
         const s16 *g = m->gains[mix];
         u16 route = mixer_route(mix);
         s16 volume = mixer_volume(mix);
-        if (!(route & 1)) {
-            l += mul16(g[0], volume);
-            r += mul16(g[1], volume);
-        } else {
+        if (mix && !route)
+            continue;                   // aux off, no effect: dropped
+        if (route & 1) {
             m->bus_gain[1 + 2 * (mix - 1)][0] = g[0];
             m->bus_gain[1 + 2 * (mix - 1)][1] = g[1];
+        } else if (!mix || rear_mode != 2) {
+            l += mul16(g[0], volume);
+            r += mul16(g[1], volume);
         }
-        if (!(route & 2)) {
-            l += mul16(g[2], volume);
-            r += mul16(g[3], volume);
-        } else {
+        if (route & 2) {
             m->bus_gain[2 + 2 * (mix - 1)][0] = g[2];
             m->bus_gain[2 + 2 * (mix - 1)][1] = g[3];
+        } else if (!rear_mode) {
+            l += mul16(g[2], volume);
+            r += mul16(g[3], volume);
         }
     }
     m->bus_gain[0][0] = sat16(l >> 14);
     m->bus_gain[0][1] = sat16(r >> 14);
+    if (!rear_mode)
+        return;
+    l = r = 0;                          // rear without its own bus
+    for (mix = 0; mix < 3; mix++)
+        if ((!mix || mixer_route(mix)) && !(mixer_route(mix) & 2)) {
+            l += mul16(m->gains[mix][2], mixer_volume(mix));
+            r += mul16(m->gains[mix][3], mixer_volume(mix));
+        }
+    m->bus_gain[BUS_MAIN_REAR][0] = sat16(l >> 14);
+    m->bus_gain[BUS_MAIN_REAR][1] = sat16(r >> 14);
+    if (rear_mode != 2)
+        return;
+    l = r = 0;                          // aux front without its own bus, after surround
+    for (mix = 1; mix < 3; mix++)
+        if (mixer_route(mix) && !(mixer_route(mix) & 1)) {
+            l += mul16(m->gains[mix][0], mixer_volume(mix));
+            r += mul16(m->gains[mix][1], mixer_volume(mix));
+        }
+    m->bus_gain[BUS_POST][0] = sat16(l >> 14);
+    m->bus_gain[BUS_POST][1] = sat16(r >> 14);
 }
 
 static void parse_source(u16 i)

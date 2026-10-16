@@ -4,8 +4,14 @@
 #include "hw.h"
 
 // second loop operand must be in Y
-#define YMEM    __attribute__((section(".ydata")))
-#define YMEM_RO __attribute__((section(".yrodata")))
+#define YMEM     __attribute__((section(".ydata")))
+#define YMEM_RO  __attribute__((section(".yrodata")))
+// not loaded at boot: whoever owns it clears it
+#define YMEM_BSS __attribute__((section(".ybss")))
+
+#ifdef __teak__
+void clear_words(void *dst, u16 words);
+#endif
 
 enum { FMT_PCM8 = 0, FMT_PCM16 = 1, FMT_ADPCM = 2 };
 enum { INTERP_POLYPHASE = 0, INTERP_LINEAR = 1, INTERP_NONE = 2 };
