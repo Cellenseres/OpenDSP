@@ -2,8 +2,9 @@
 #include <3ds.h>
 #include <string.h>
 #include "opendsp.h"
+#include "internal.h"
 
-#define ERR_NO_IMAGE MAKERESULT(RL_PERMANENT, RS_NOTFOUND, RM_DSP, RD_NOT_FOUND)
+bool opendsp_running;
 
 bool opendspCheckImage(const void *image, u32 size)
 {
@@ -17,14 +18,21 @@ bool opendspCheckImage(const void *image, u32 size)
 
 Result opendspInitFromMemory(const void *image, u32 size)
 {
+    Result rc;
     if (!opendspCheckImage(image, size))
-        return ERR_NO_IMAGE;
+        return OPENDSP_ERR_NO_IMAGE;
+    opendsp_mailbox_setup();
     // ndspInit() then loads this image instead of dspfirm.cdc
     ndspUseComponent(image, size, 0xFF, 0xFF);
-    return ndspInit();
+    rc = ndspInit();
+    if (R_SUCCEEDED(rc))
+        opendsp_running = true;
+    return rc;
 }
 
 void opendspExit(void)
 {
     ndspExit();
+    opendsp_running = false;
+    opendsp_effects_release();
 }
