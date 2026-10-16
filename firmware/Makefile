@@ -9,7 +9,7 @@ PYTHON ?= python3
 CFLAGS := --target=teak -march=teak -O2 -ffreestanding -fno-builtin -nostdlib \
           -integrated-as -Wall -Wno-int-to-pointer-cast
 
-OBJECTS := crt0.o main.o output.o dma.o voice.o source.o mixer.o reverb.o reverb_kernels.o surround.o stats.o math.o kernels.o
+OBJECTS := crt0.o main.o output.o dma.o voice.o source.o mixer.o reverb.o reverb_kernels.o surround.o mailbox.o stats.o math.o kernels.o
 HEADERS := $(wildcard *.h)
 
 all: opendsp.cdc
