@@ -3,6 +3,7 @@
 #include "voice.h"
 #include "dma.h"
 #include "polyphase_table.h"
+#include "output.h"
 
 static s16 window_buf[4 + 2 * WINDOW_FRAMES];
 static s16 *const window = window_buf + 4; // 4 history slots before
@@ -325,6 +326,7 @@ int voice_render(voice_t *v, s16 *out)
     resample_job.frac = v->frac;
     resample_job.count = FRAME_SAMPLES;
     resample_job.table = polyphase_table;
+    output_poll();
     resample(&resample_job);
 
     if (last_input >= available) {
