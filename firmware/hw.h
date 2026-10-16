@@ -2,10 +2,18 @@
 // Teak core and peripheral registers.
 #pragma once
 
+#ifdef __teak__
 typedef unsigned short u16;
 typedef signed short s16;
 typedef unsigned long u32;
 typedef signed long s32;
+#else                                   // host tests
+#include <stdint.h>
+typedef uint16_t u16;
+typedef int16_t s16;
+typedef uint32_t u32;
+typedef int32_t s32;
+#endif
 typedef volatile u16 vu16;
 
 #define FRAME_SAMPLES 160

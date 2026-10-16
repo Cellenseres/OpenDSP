@@ -24,7 +24,7 @@ def elf_segments(path):
     for i in range(phnum):
         p_type, p_offset, p_vaddr, _, p_filesz, p_memsz, _, _ = \
             struct.unpack_from("<8I", b, phoff + i * phentsize)
-        if p_type != 1 or p_memsz == 0:
+        if p_type != 1 or p_filesz == 0:     # .ybss: its owners clear it
             continue
         data = b[p_offset:p_offset + p_filesz] + bytes(p_memsz - p_filesz)
         if len(data) & 1:
