@@ -30,6 +30,8 @@ def elf_segments(path):
         if len(data) & 1:
             data += b"\0"
         if p_vaddr >= DATA_BASE:
+            if p_vaddr >= DATA_BASE + 0x20000:
+                continue              # AAC bank1 tables uploaded explicitly
             segments.append((2, (p_vaddr - DATA_BASE) // 2, data))
         else:
             segments.append((0, p_vaddr // 2, data))

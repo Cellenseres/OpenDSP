@@ -6,10 +6,12 @@
 #include "source.h"
 #include "reverb.h"
 #include "stats.h"
+#include "aac/stream.h"
+#include "aac_protocol.h"
 
 #define BOX ((vu16 *)EXT_BASE)
 #define FIRMWARE_VERSION 0x0101
-#define CAPABILITIES (EXT_CAP_MAILBOX | EXT_CAP_DELAY | EXT_CAP_REVERB)
+#define CAPABILITIES (EXT_CAP_MAILBOX | EXT_CAP_DELAY | EXT_CAP_REVERB | AAC_CAP_DSP)
 
 void mailbox_init(void)
 {
@@ -95,6 +97,8 @@ static u16 read_stats(vu16 *args)
 
 static u16 handle(u16 command, vu16 *args)
 {
+    if (command >= AAC_CMD_OPEN && command <= AAC_CMD_STATS)
+        return aac_stream_command(command, args, BOX + EXT_REPLY);
     switch (command) {
     case EXT_CMD_PING:
         BOX[EXT_REPLY] = FIRMWARE_VERSION;

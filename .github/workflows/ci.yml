@@ -24,7 +24,7 @@ jobs:
         run: make -C examples/soundlab
 
   firmware:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Tools
@@ -34,7 +34,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: toolchain/teak-llvm/build/bin
-          key: teak-llvm-${{ hashFiles('toolchain/build_teak_llvm.sh', 'toolchain/patches/*') }}
+          key: teak-llvm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('toolchain/build_teak_llvm.sh', 'toolchain/patches/*') }}
       - name: Build teak-llvm
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -43,9 +43,19 @@ jobs:
       - name: Firmware
         run: |
           cp firmware/opendsp.cdc /tmp/prebuilt.cdc
+          cp firmware/aac_tables.bin /tmp/prebuilt-aac-tables.bin
           make -C firmware
-          if cmp -s firmware/opendsp.cdc /tmp/prebuilt.cdc; then
-            echo "firmware/opendsp.cdc matches the source"
-          else
-            echo "::warning::firmware/opendsp.cdc differs from a fresh build (expected between releases)"
-          fi
+      - name: Built firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            firmware/opendsp.cdc
+            firmware/aac_tables.bin
+            firmware/opendsp.elf
+            firmware/opendsp.map
+          if-no-files-found: error
+      - name: Prebuilt firmware
+        run: |
+          cmp firmware/aac_tables.bin /tmp/prebuilt-aac-tables.bin
+          cmp firmware/opendsp.cdc /tmp/prebuilt.cdc
