@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: BSD-2-Clause
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Effects
+        run: make -C tests/effects test
+
+  library:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Library
+        run: make -C library
+      - name: Sound Lab (.3dsx)
+        run: make -C examples/soundlab
+
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang lld cmake python3
+      - name: Cached teak-llvm
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: toolchain/teak-llvm/build/bin
+          key: teak-llvm-${{ hashFiles('toolchain/build_teak_llvm.sh', 'toolchain/patches/*') }}
+      - name: Build teak-llvm
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          toolchain/build_teak_llvm.sh
+          find toolchain/teak-llvm/build -mindepth 1 -maxdepth 1 ! -name bin -exec rm -rf {} +
+      - name: Firmware
+        run: |
+          cp firmware/opendsp.cdc /tmp/prebuilt.cdc
+          make -C firmware
+          if cmp -s firmware/opendsp.cdc /tmp/prebuilt.cdc; then
+            echo "firmware/opendsp.cdc matches the source"
+          else
+            echo "::warning::firmware/opendsp.cdc differs from a fresh build (expected between releases)"
+          fi
