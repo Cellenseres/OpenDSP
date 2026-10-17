@@ -3,6 +3,7 @@
 #include "source.h"
 #include "shared_mem.h"
 #include "mixer.h"
+#include "output.h"
 
 #define CONFIG_WORDS 96
 #define STATUS_WORDS 6
@@ -296,6 +297,26 @@ static void parse_source(u16 i)
 static filter_job_t filter_job;
 static s16 filter_coefs[5] YMEM;
 
+__attribute__((noinline)) static void simple_frame(void)
+{
+    u16 n, address = (u16)(unsigned)filter_job.buf;
+    for (n = 0; n < 5; n++) {
+        filter_job.buf = (s16 *)(unsigned)address;
+        output_poll(); filter_simple(&filter_job);
+        address += 64;
+    }
+}
+
+__attribute__((noinline)) static void biquad_frame(void)
+{
+    u16 n, address = (u16)(unsigned)filter_job.buf;
+    for (n = 0; n < 5; n++) {
+        filter_job.buf = (s16 *)(unsigned)address;
+        output_poll(); filter_biquad(&filter_job);
+        address += 64;
+    }
+}
+
 static void run_filters(source_mix_t *m)
 {
     u16 ch, k;
@@ -306,7 +327,7 @@ static void run_filters(source_mix_t *m)
             filter_job.buf = voice_out + ch;
             filter_job.state = m->simple_state[ch];
             filter_job.coefs = filter_coefs;
-            filter_simple(&filter_job);
+            simple_frame();
         }
     }
     if (m->filters & 2) {
@@ -316,7 +337,7 @@ static void run_filters(source_mix_t *m)
             filter_job.buf = voice_out + ch;
             filter_job.state = m->biquad_state[ch];
             filter_job.coefs = filter_coefs;
-            filter_biquad(&filter_job);
+            biquad_frame();
         }
     }
 }
