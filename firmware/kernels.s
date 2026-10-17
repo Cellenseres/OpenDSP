@@ -324,7 +324,7 @@ filter_simple:
     mov     [r3++], r0              // state
     modr    [r3++]
     mov     [r3], r4                // coef
-    mov     0x9f, r3
+    mov     0x1f, r3                // 32 samples; caller slices the frame
     dint
     bkrep   r3, .Lfs_end
     mov     [r1], a1l
@@ -363,7 +363,7 @@ filter_biquad:
     mov     [r3++], r0              // state
     modr    [r3++]
     mov     [r3], r5                // coef base
-    mov     0x9f, r3
+    mov     0x1f, r3                // 32 samples; caller slices the frame
     dint
     bkrep   r3, .Lfb_end
     mov     r5, r4
@@ -603,10 +603,10 @@ bus_normalize:
     pop     r0
     ret     always
 
-// void bus_return_half(const u16 *job): front L, front R, rear L, rear R, main, volume
-// main += sat16(front + rear) * volume, both channels, 80 samples
-.global bus_return_half
-bus_return_half:
+// void bus_return_chunk(const u16 *job): front L, front R, rear L, rear R, main, volume
+// main += sat16(front + rear) * volume, both channels, 40 samples
+.global bus_return_chunk
+bus_return_chunk:
     push    r0
     push    r1
     push    r2
@@ -621,7 +621,7 @@ bus_return_half:
     mov     [r4++], a1
     mov     [r4], y0                // volume
     mov     a1l, r4                 // main, interleaved L R
-    mov     0x4f, a1                // 80 samples per call
+    mov     0x27, a1                // 40 samples per call
     dint
     bkrep   a1l, .Lbr_end
     mov     [r0++], a0h             // left = front L + rear L
@@ -769,7 +769,7 @@ soft_clip_positive:
     lim     a0, a0
     ret     always
 
-// void delay_run(const u16 *job): bus (s32, stride 2), line (s16), coefs b a g, y state; 80 samples
+// void delay_run(const u16 *job): bus (s32, stride 2), line (s16), coefs b a g, y state; 40 samples
 // y = sat16((b y + a line) >> 7), line = sat16(in - (g y >> 7)), bus = y. Q7.
 .global delay_run
 delay_run:
@@ -784,7 +784,7 @@ delay_run:
     mov     [r3++], r2              // coefs
     mov     [r3], r3                // y state
     mov     [r3], b1h
-    mov     0x4f, a1                // 80 samples per call
+    mov     0x27, a1                // 40 samples per call
     dint
     bkrep   a1l, .Ldl_end
     mov     [r0++], a0h             // in = sat16(bus)

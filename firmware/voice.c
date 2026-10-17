@@ -305,16 +305,20 @@ int voice_render(voice_t *v, s16 *out)
         }
     }
 
-    resample_job.window = window;
-    resample_job.out = out;
     resample_job.step = v->step;
     resample_job.stereo = v->stereo;
     resample_job.interp = v->interp;
-    resample_job.frac = v->frac;
-    resample_job.count = FRAME_SAMPLES;
+    resample_job.count = 32;
     resample_job.table = polyphase_table;
-    output_poll();
-    resample(&resample_job);
+    t = v->frac;
+    for (k = 0; k < FRAME_SAMPLES; k += 32) {
+        resample_job.window = window + ((u16)(t >> 16) << shift);
+        resample_job.out = out + 2 * k;
+        resample_job.frac = (u16)t;
+        output_poll();
+        resample(&resample_job);
+        t += v->step << 5;
+    }
 
     if (last_input >= available) {
         // stream ended: silence from the first missing input
