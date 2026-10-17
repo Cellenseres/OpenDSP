@@ -50,7 +50,7 @@ cia: all
 	bannertool makebanner -i meta/banner.png -a meta/banner.wav -o $(BUILD)/banner.bnr
 	makerom -f cia -o $(TARGET).cia -target t -exefslogo -rsf meta/soundlab.rsf \
 		-elf $(TARGET).elf -icon $(TARGET).smdh -banner $(BUILD)/banner.bnr \
-		-major 1 -minor 0 -micro 0
+		-major 1 -minor 1 -micro 0
 
 clean:
 	@rm -rf $(BUILD) $(TARGET).3dsx $(TARGET).smdh $(TARGET).elf $(TARGET).cia

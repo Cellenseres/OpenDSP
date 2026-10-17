@@ -248,9 +248,7 @@ bool wav_play(int i, char *err, size_t errlen)
     ndspChnWaveBufClear(CH_WAV);
     ndspChnSetFormat(CH_WAV, fmt);
     wav_apply();
-    float mix[12] = {0};
-    mix[0] = mix[1] = 1.0f;
-    ndspChnSetMix(CH_WAV, mix);
+    audio_set_mix(CH_WAV, 1.0f, 1.0f);
     for (int k = 0; k < NBUF; k++) {
         memset(&wb[k], 0, sizeof wb[k]);
         wb[k].data_vaddr = mem[k];
