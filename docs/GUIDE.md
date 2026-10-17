@@ -99,6 +99,49 @@ int main(void)
 As with the original firmware, sample data has to be in linear memory and flushed with
 `DSP_FlushDataCache()`.
 
+## Reverb and delay
+
+OpenDSP has a reverb and a delay that run on the DSP. They sit on the two aux buses ndsp
+already has: a voice sends to bus 0 with mix gains 4 to 7 and to bus 1 with gains 8 to 11,
+and `ndspAuxSetVolume()` sets how much comes back.
+
+```c
+#include <opendsp/effects.h>
+
+u32 caps = 0;
+opendspGetCapabilities(&caps);
+if (caps & OPENDSP_CAP_REVERB) {
+    opendspReverbConfig hall = {
+        .struct_size = sizeof(hall),
+        .room_size = 0.9f, .decay_time = 2.5f, .damping = 0.35f,
+        .diffusion = 0.75f, .width = 1.0f, .level = 0.7f,
+    };
+    opendspReverbSet(0, &hall);
+    ndspAuxSetVolume(0, 0.7f);
+}
+
+float mix[12] = {0};
+mix[0] = mix[1] = 1.0f;     // dry
+mix[4] = mix[5] = 0.4f;     // send to the reverb
+ndspChnSetMix(0, mix);
+```
+
+`opendspDelaySet()` works the same way and gets its buffer from linear memory. `NULL`
+switches an effect off.
+
+Don't call `ndspAuxSetEnable()` on a bus with a DSP effect. That hands the bus to the ARM
+first, ndsp never writes it back, and the effect only gets silence.
+
+The effects only exist in the OpenDSP firmware, so check the capability bits if your app
+might run with another one.
+
+A playing reverb takes about 13 % of the DSP time, including what it costs to send music
+to it. Once the input is silent and the tail is gone, it costs nothing. 24 voices with
+both reverbs and a delay still fit.
+
+The Sound Lab presets are a good place to start. They are our own settings, not copies of
+any Nintendo sound.
+
 ## License
 
 When you ship your app, include the copyright line and the text from `LICENSE` in your credits

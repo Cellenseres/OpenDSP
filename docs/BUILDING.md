@@ -38,4 +38,17 @@ teak-llvm also has a few gaps: no 32-bit multiplication (hence `mul16` and shift
 arrays crash it. That's why many buffers in the firmware are static.
 
 Inner loops that use the multiplier read their second operand from Y memory. Tables they use
-need `YMEM` or `YMEM_RO` (see `voice.h`).
+need `YMEM` or `YMEM_RO` (see `voice.h`). An instruction with two memory operands has to read
+one from X and one from Y; emulators let you get away with both in X, the console doesn't.
+
+An interrupt between a multiply and the use of its product corrupts the product on hardware.
+So loops with the multiplier run with interrupts off, in spans shorter than one output sample,
+and the output FIFO is topped up before each one.
+
+teak-llvm crashes on functions with more than four arguments, and `return x == constant;` can
+come out wrong. Assign to a variable first.
+
+## Tests
+
+`make -C tests/effects` builds the reverb for the host and checks impulse response, decay and
+silence. No DSP toolchain needed.
