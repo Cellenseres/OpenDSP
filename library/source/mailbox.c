@@ -13,6 +13,7 @@ static bool lock_ready;
 
 void opendsp_mailbox_setup(void)
 {
+    opendsp_aac_setup();
     if (!lock_ready) {
         LightLock_Init(&lock);
         lock_ready = true;

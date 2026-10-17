@@ -10,3 +10,8 @@ opendsp_firmware_end:
     .global opendsp_firmware_size
 opendsp_firmware_size:
     .word opendsp_firmware_end - opendsp_firmware
+    .section .rodata.opendsp_aac_tables, "a"
+    .balign 4
+    .global opendsp_aac_tables
+opendsp_aac_tables:
+    .incbin "aac_tables.bin"
