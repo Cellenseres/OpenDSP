@@ -10,7 +10,7 @@
 #include "wav.h"
 #include "gfx.h"
 
-#define APP_VERSION "1.0.0"
+#define APP_VERSION "1.1.0"
 
 static PrintConsole bottom;
 
@@ -55,14 +55,14 @@ static void hints(const char *h) { printf("\x1b[29;1H" C_HINT "%-39.39s" C_RESET
 
 // pages
 
-enum { P_MAIN, P_MUSIC, P_SFX, P_WAV, P_KEYS, P_FX, P_LAB, P_ABOUT, P_COUNT };
+enum { P_MAIN, P_MUSIC, P_SFX, P_WAV, P_KEYS, P_FX, P_VERB, P_LAB, P_ABOUT, P_COUNT };
 static int page = P_MAIN, cursor[P_COUNT], items;
 static bool dirty = true, quit;
 static char message[80];
 
 static const char *main_items[] = {"Music: \"Teak Street\"", "Sound effects", "WAV player (SD card)",
-                                   "Touch keyboard", "Mixer & effects", "DSP lab", "About", "Exit"};
-#define MAIN_ITEMS 8
+                                   "Touch keyboard", "Mixer & filters", "Reverb & delay", "DSP lab", "About", "Exit"};
+#define MAIN_ITEMS 9
 
 static const char *on_off(bool b) { return b ? "ON" : "OFF"; }
 
@@ -210,7 +210,7 @@ static const char *interp_names[3] = {"Polyphase", "Linear", "None"};
 static void draw_fx(void)
 {
     char v[32];
-    header("Mixer & effects");
+    header("Mixer & filters");
     items = 9;
     snprintf(v, sizeof v, "%d %%", S.master);
     item(3, cursor[page] == 0, "Master volume", v);
@@ -230,6 +230,59 @@ static void draw_fx(void)
     line(16, C_DIM "  Compare Polyphase and None at");
     line(17, C_DIM "  50 %% pitch.");
     hints(" </> change   L/R x10   B back");
+}
+
+static void draw_verb(void)
+{
+    char v[32];
+    header("Reverb & delay");
+    if (!audio_effects_available()) {
+        items = 0;
+        line(3, C_WARN "  This firmware has no DSP effects.");
+        hints(" B back");
+        return;
+    }
+    items = 7;
+    item(3, cursor[page] == 0, "Reverb", audio_reverb_name(S.reverb));
+    snprintf(v, sizeof v, "%d %%", S.reverb_send);
+    item(4, cursor[page] == 1, "Reverb send", v);
+    snprintf(v, sizeof v, "%d %%", S.reverb_return);
+    item(5, cursor[page] == 2, "Reverb return", v);
+    snprintf(v, sizeof v, "%d.%d s", S.reverb_decay / 10, S.reverb_decay % 10);
+    item(6, cursor[page] == 3, "Decay time", v);
+    item(8, cursor[page] == 4, "Delay", on_off(S.delay));
+    snprintf(v, sizeof v, "%d ms", S.delay_ms);
+    item(9, cursor[page] == 5, "Delay time", v);
+    snprintf(v, sizeof v, "%d %%", S.delay_feedback);
+    item(10, cursor[page] == 6, "Delay feedback", v);
+    line(13, C_DIM "  Both effects run on the DSP:");
+    line(14, C_DIM "  reverb on aux bus 0, delay on 1.");
+    line(16, C_DIM "  Play the music or the keyboard");
+    line(17, C_DIM "  and change the settings.");
+    line(19, C_DIM "  Firmware %d.%d", audio_firmware_version() >> 8, audio_firmware_version() & 0xFF);
+    hints(" </> change   L/R x10   B back");
+}
+
+static int clamp_int(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+static int wrap_int(int v, int n) { return ((v % n) + n) % n; }
+
+static void adjust_verb(int index, int delta, int big)
+{
+    switch (index) {
+    case 0:
+        S.reverb = wrap_int(S.reverb + delta, audio_reverb_count());
+        if (S.reverb)
+            S.reverb_decay = (int)(audio_reverb_default_decay(S.reverb) * 10 + 0.5f);
+        break;
+    case 1: S.reverb_send = clamp_int(S.reverb_send + delta * (big ? 20 : 5), 0, 100); break;
+    case 2: S.reverb_return = clamp_int(S.reverb_return + delta * (big ? 20 : 5), 0, 100); break;
+    case 3: S.reverb_decay = clamp_int(S.reverb_decay + delta * (big ? 10 : 1), 1, 100); break;
+    case 4: S.delay ^= 1; break;
+    case 5: S.delay_ms = clamp_int(S.delay_ms + delta * (big ? 100 : 20), 20, 960); break;
+    case 6: S.delay_feedback = clamp_int(S.delay_feedback + delta * (big ? 20 : 5), 0, 90); break;
+    }
+    audio_apply_effects();
+    wav_apply();
 }
 
 static void draw_lab(void)
@@ -258,7 +311,7 @@ static void draw_about(void)
     line(4, "  firmware for the Nintendo 3DS");
     line(6, C_DIM "  24 voices, PCM8, PCM16, DSP-ADPCM,");
     line(7, C_DIM "  three interpolation modes, filters,");
-    line(8, C_DIM "  aux buses, mono/stereo/surround.");
+    line(8, C_DIM "  aux buses, reverb, delay, surround.");
     line(10, "  The firmware is built into this app");
     line(11, "  and started with " C_VAL "opendspInit()" C_RESET ".");
     line(13, C_DIM "  Made by Cellenseres");
@@ -278,6 +331,7 @@ static void draw_bottom(void)
     case P_WAV:   draw_wav(); break;
     case P_KEYS:  draw_keys(); break;
     case P_FX:    draw_fx(); break;
+    case P_VERB:  draw_verb(); break;
     case P_LAB:   draw_lab(); break;
     case P_ABOUT: draw_about(); break;
     }
@@ -286,9 +340,6 @@ static void draw_bottom(void)
 }
 
 // input
-
-static int clamp_int(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
-static int wrap_int(int v, int n) { return ((v % n) + n) % n; }
 
 static void adjust_fx(int index, int delta, int big)
 {
@@ -416,9 +467,9 @@ static void input(void)
     switch (page) {
     case P_MAIN:
         if (down & KEY_A) {
-            static const int pages[7] = {P_MUSIC, P_SFX, P_WAV, P_KEYS, P_FX, P_LAB, P_ABOUT};
+            static const int pages[8] = {P_MUSIC, P_SFX, P_WAV, P_KEYS, P_FX, P_VERB, P_LAB, P_ABOUT};
             ui_blip(1);
-            if (*c == 7) {
+            if (*c == 8) {
                 quit = true;
                 return;
             }
@@ -490,6 +541,17 @@ static void input(void)
         }
         if (down & KEY_A) {
             adjust_fx(*c, 1, 0);
+            ui_blip(1);
+            dirty = true;
+        }
+        break;
+    case P_VERB:
+        if (delta) {
+            adjust_verb(*c, delta, big);
+            dirty = true;
+        }
+        if (down & KEY_A) {
+            adjust_verb(*c, 1, 0);
             ui_blip(1);
             dirty = true;
         }

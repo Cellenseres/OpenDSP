@@ -6,13 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <opendsp.h>
+#include <opendsp/effects.h>
 #include "audio.h"
 
 #define SAMPLE_RATE 32728.0f
 #define TABLE_LEN   64
 #define PI_F        3.14159265f
 
-settings_t S = {80, 1, 1, 0, 100, 0, 1500, 0, 50, 1, 3, 4};
+settings_t S = {80, 1, 1, 0, 100, 0, 1500, 0, 50, 1, 3, 4, 2, 35, 70, 26, 0, 300, 35};
 
 // sounds
 
@@ -339,11 +340,19 @@ static LightLock lock;
 
 static float note_hz(int midi) { return 440.f * powf(2.f, (midi - 69) / 12.f); }
 
-static void set_mix(int ch, float l, float r)
+// main, plus sends: aux 0 reverb, aux 1 delay
+void audio_set_mix(int ch, float l, float r)
 {
     float mix[12] = {0};
+    float reverb = S.reverb ? S.reverb_send / 100.f : 0, delay = S.delay ? 0.5f : 0;
     mix[0] = l;
     mix[1] = r;
+    if (ch != CH_UI) {
+        mix[4] = l * reverb;
+        mix[5] = r * reverb;
+        mix[8] = l * delay;
+        mix[9] = r * delay;
+    }
     ndspChnSetMix(ch, mix);
 }
 
@@ -371,6 +380,7 @@ static void tone_on(int ch, int wave, float freq, float volume, float pan, int a
     channel_t *c = &channels[ch];
     if (!c->running || c->wave != wave) {
         prepare_channel(ch, NDSP_FORMAT_MONO_PCM16);
+        audio_set_mix(ch, 0, 0);        // reset leaves full volume until the envelope runs
         memset(&wavebufs[ch], 0, sizeof wavebufs[ch]);
         wavebufs[ch].data_pcm16 = tables[wave];
         wavebufs[ch].nsamples = TABLE_LEN;
@@ -432,7 +442,7 @@ static void update_channel(int ch)
     pan_gains(c->pan + (c->music ? S.pan / 100.f : 0), &pl, &pr);
     float l = c->level * c->volume * pl, r = c->level * c->volume * pr;
     if (fabsf(l - c->last_l) > 0.0005f || fabsf(r - c->last_r) > 0.0005f) {
-        set_mix(ch, l, r);
+        audio_set_mix(ch, l, r);
         c->last_l = l;
         c->last_r = r;
     }
@@ -454,7 +464,7 @@ static void play_sample(int ch, const sample_t *s, float rate, float volume, flo
     ndspChnSetRate(ch, SAMPLE_RATE * rate);
     float pl, pr;
     pan_gains(pan, &pl, &pr);
-    set_mix(ch, volume * s->volume * pl, volume * s->volume * pr);
+    audio_set_mix(ch, volume * s->volume * pl, volume * s->volume * pr);
     memset(&wavebufs[ch], 0, sizeof wavebufs[ch]);
     wavebufs[ch].data_vaddr = s->data;
     wavebufs[ch].nsamples = s->length;
@@ -636,6 +646,49 @@ void audio_apply_settings(void)
     apply_filter(CH_WAV);
 }
 
+typedef struct { const char *name; float size, decay, damping, diffusion, width, level; } reverb_preset_t;
+static const reverb_preset_t presets[] = {
+    {"Off", 0, 0, 0, 0, 0, 0},
+    {"Room", 0.35f, 0.8f, 0.5f, 0.6f, 0.8f, 0.8f},
+    {"Hall", 0.9f, 2.6f, 0.35f, 0.75f, 1.0f, 0.7f},
+    {"Plate", 0.6f, 1.6f, 0.15f, 0.9f, 1.0f, 0.8f},
+    {"Cave", 1.0f, 6.0f, 0.6f, 0.5f, 1.0f, 0.6f},
+};
+static u32 caps;
+static u16 firmware_version;
+
+const char *audio_reverb_name(int p) { return p >= 0 && p < audio_reverb_count() ? presets[p].name : "?"; }
+int audio_reverb_count(void) { return sizeof presets / sizeof presets[0]; }
+float audio_reverb_default_decay(int p) { return presets[p].decay; }
+bool audio_effects_available(void) { return (caps & OPENDSP_CAP_REVERB) && (caps & OPENDSP_CAP_DELAY); }
+u16 audio_firmware_version(void) { return firmware_version; }
+
+void audio_apply_effects(void)
+{
+    if (!audio_effects_available())
+        return;
+    if (S.reverb) {
+        const reverb_preset_t *p = &presets[S.reverb];
+        opendspReverbConfig r = {sizeof r, p->size, S.reverb_decay / 10.f, p->damping, p->diffusion, p->width, p->level};
+        opendspReverbSet(0, &r);
+    } else {
+        opendspReverbSet(0, NULL);
+    }
+    ndspAuxSetVolume(0, S.reverb_return / 100.f);
+    if (S.delay) {
+        opendspDelayConfig d = {sizeof d, (float)S.delay_ms, S.delay_feedback / 100.f, 0.4f, 0.6f};
+        opendspDelaySet(1, &d);
+    } else {
+        opendspDelaySet(1, NULL);
+    }
+    ndspAuxSetVolume(1, 1.0f);
+    // sends changed: refresh every channel
+    LightLock_Lock(&lock);
+    for (int ch = 0; ch < 24; ch++)
+        channels[ch].last_l = channels[ch].last_r = -1;
+    LightLock_Unlock(&lock);
+}
+
 bool audio_init(char *error, size_t error_len)
 {
     LightLock_Init(&lock);
@@ -656,7 +709,10 @@ bool audio_init(char *error, size_t error_len)
     capture.data_pcm16 = capture_buf;
     capture.nsamples = CAPTURE_FRAMES;
     ndspSetCapture(&capture);
+    opendspGetCapabilities(&caps);
+    opendspGetFirmwareVersion(&firmware_version);
     audio_apply_settings();
+    audio_apply_effects();
     ndspSetCallback(on_frame, NULL);
     s32 priority = 0x30;
     svcGetThreadPriority(&priority, CUR_THREAD_HANDLE);

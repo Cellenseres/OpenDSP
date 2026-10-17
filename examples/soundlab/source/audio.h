@@ -30,12 +30,26 @@ typedef struct {
     int ui_sounds;
     int key_wave;
     int key_octave;
+    int reverb;         // preset, 0 off
+    int reverb_send;    // 0..100 %
+    int reverb_return;  // 0..100 %
+    int reverb_decay;   // tenths of a second
+    int delay;          // 0 off, 1 on
+    int delay_ms;
+    int delay_feedback; // 0..90 %
 } settings_t;
 extern settings_t S;
 
 bool audio_init(char *error, size_t error_len);
 void audio_exit(void);
 void audio_apply_settings(void);
+void audio_apply_effects(void);
+void audio_set_mix(int ch, float l, float r);
+const char *audio_reverb_name(int preset);
+int audio_reverb_count(void);
+float audio_reverb_default_decay(int preset);
+bool audio_effects_available(void);
+u16 audio_firmware_version(void);
 const char *audio_filter_name(int f);
 int audio_filter_count(void);
 const char *audio_wave_name(int w);
