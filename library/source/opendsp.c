@@ -34,5 +34,6 @@ void opendspExit(void)
 {
     ndspExit();
     opendsp_running = false;
+    opendsp_aac_release();
     opendsp_effects_release();
 }

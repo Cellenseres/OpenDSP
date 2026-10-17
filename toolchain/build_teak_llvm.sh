@@ -12,10 +12,16 @@ if [ ! -d teak-llvm ]; then
 fi
 cd teak-llvm
 git checkout -q "$COMMIT"
+# This upstream file has CRLF line endings.
+sed -i 's/\r$//' llvm/lib/Target/Teak/TeakAsmPrinter.cpp
 for p in "$HERE"/patches/*.patch; do
     if git apply --check "$p" 2>/dev/null; then
         git apply "$p"
+    elif ! git apply --reverse --check "$p" 2>/dev/null; then
+        echo "Cannot apply required patch: $p" >&2
+        exit 1
     fi
+    git apply --reverse --check "$p"
 done
 
 mkdir -p build

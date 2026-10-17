@@ -7,6 +7,7 @@
 #include "dma.h"
 #include "mailbox.h"
 #include "stats.h"
+#include "aac/stream.h"
 
 #define PIPE_TABLE     0x0800
 #define PIPE_BUFFERS   0x0900
@@ -177,6 +178,7 @@ static void handle_audio_command(void)
         pipe_get(SLOT_AUDIO_IN, &pad);
         switch (cmd & 0xFF) {
         case 0:                         // initialize
+            aac_stream_init();
             clear_bank(0);
             clear_bank(1);
             frames = 0;
@@ -187,17 +189,20 @@ static void handle_audio_command(void)
             start_init();
             break;
         case 1:                         // shutdown
+            aac_stream_init();
             state = STATE_OFF;
             init_pending = 0;
             output_stop();
             reply0_pending = 1;
             break;
         case 2:                         // wake up
+            aac_stream_init();
             if (!output_running)
                 output_start();
             start_init();
             break;
         case 3:                         // sleep
+            aac_stream_init();
             state = STATE_SLEEP;
             init_pending = 0;
             wake_arm = 1;               // releases ndsp's waiting thread
@@ -316,6 +321,7 @@ static void render_frame(void)
 int main(void)
 {
     state = STATE_OFF;
+    aac_stream_init();
     stats_init();
     mailbox_init();
     pipes_init();
@@ -333,6 +339,6 @@ int main(void)
             stats_frame_begin(frames_due);
             render_frame();
             stats_frame_end();
-        }
+        } else aac_stream_poll();
     }
 }

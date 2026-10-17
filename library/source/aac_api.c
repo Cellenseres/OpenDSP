@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: BSD-2-Clause
-// Public AAC API over the portable core.
 #include <stdlib.h>
 #include "opendsp/aac.h"
 #include "aac/aac.h"
+#include "aac_backend.h"
 
 struct opendspAacDecoder {
-    aac_decoder_t core;
+    aac_decoder_t *core;
+    aac_dsp_backend *dsp;
     u32 backend;
 };
 
@@ -21,14 +22,36 @@ Result opendspAacOpen(opendspAacDecoder **out, const opendspAacConfig *config)
             return OPENDSP_AAC_ERR_INVALID_ARG;
         backend = config->backend;
     }
-    if (backend == OPENDSP_AAC_BACKEND_DSP)
-        return OPENDSP_AAC_ERR_BACKEND;
-    if (backend != OPENDSP_AAC_BACKEND_AUTO && backend != OPENDSP_AAC_BACKEND_ARM11)
+    if (backend != OPENDSP_AAC_BACKEND_AUTO && backend != OPENDSP_AAC_BACKEND_ARM11 && backend != OPENDSP_AAC_BACKEND_DSP)
         return OPENDSP_AAC_ERR_INVALID_ARG;
-    dec = malloc(sizeof(*dec));
+    dec = calloc(1, sizeof(*dec));
     if (!dec)
         return OPENDSP_AAC_ERR_NO_MEMORY;
-    aac_decoder_init(&dec->core);
+#ifdef __3DS__
+    if (backend != OPENDSP_AAC_BACKEND_ARM11) {
+        Result rc = aac_backend_open(&dec->dsp);
+        if (R_SUCCEEDED(rc)) {
+            dec->backend = OPENDSP_AAC_BACKEND_DSP;
+            *out = dec;
+            return 0;
+        }
+        if (backend == OPENDSP_AAC_BACKEND_DSP) {
+            free(dec);
+            return rc;
+        }
+    }
+#else
+    if (backend == OPENDSP_AAC_BACKEND_DSP) {
+        free(dec);
+        return OPENDSP_AAC_ERR_BACKEND;
+    }
+#endif
+    dec->core = malloc(sizeof(*dec->core));
+    if (!dec->core) {
+        free(dec);
+        return OPENDSP_AAC_ERR_NO_MEMORY;
+    }
+    aac_decoder_init(dec->core);
     dec->backend = OPENDSP_AAC_BACKEND_ARM11;
     *out = dec;
     return 0;
@@ -62,7 +85,12 @@ Result opendspAacDecode(opendspAacDecoder *dec, const void *input, size_t input_
     aac_status_t s;
     if (!dec)
         return OPENDSP_AAC_ERR_INVALID_ARG;
-    s = aac_decode(&dec->core, input, input_bytes, bytes_consumed, pcm_interleaved, pcm_capacity_frames,
+#ifdef __3DS__
+    if (dec->dsp)
+        return aac_backend_decode(dec->dsp, input, input_bytes, bytes_consumed, pcm_interleaved,
+                                  pcm_capacity_frames, frames_written, info);
+#endif
+    s = aac_decode(dec->core, input, input_bytes, bytes_consumed, pcm_interleaved, pcm_capacity_frames,
                    frames_written, &frame);
     if (info && frame.frame_bytes) {
         info->sample_rate = frame.sample_rate;
@@ -77,11 +105,43 @@ Result opendspAacDecode(opendspAacDecoder *dec, const void *input, size_t input_
 
 void opendspAacReset(opendspAacDecoder *dec)
 {
-    if (dec)
-        aac_decoder_reset(&dec->core);
+    if (dec) {
+#ifdef __3DS__
+        if (dec->dsp) {
+            aac_backend_reset(dec->dsp);
+            return;
+        }
+#endif
+        aac_decoder_reset(dec->core);
+    }
 }
 
 void opendspAacClose(opendspAacDecoder *dec)
 {
+    if (!dec)
+        return;
+#ifdef __3DS__
+    if (dec->dsp)
+        aac_backend_close(dec->dsp);
+#endif
+    free(dec->core);
     free(dec);
+}
+
+u32 opendspAacGetBackend(const opendspAacDecoder *dec)
+{
+    return dec ? dec->backend : OPENDSP_AAC_BACKEND_AUTO;
+}
+
+Result opendspAacGetStats(opendspAacDecoder *dec, opendspAacStats *stats)
+{
+    if (!dec || !stats || stats->struct_size != sizeof(*stats))
+        return OPENDSP_AAC_ERR_INVALID_ARG;
+#ifdef __3DS__
+    if (!dec->dsp)
+        return OPENDSP_AAC_ERR_BACKEND;
+    return aac_backend_stats(dec->dsp, stats);
+#else
+    return OPENDSP_AAC_ERR_BACKEND;
+#endif
 }

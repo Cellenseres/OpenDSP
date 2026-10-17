@@ -11,3 +11,5 @@ void opendsp_mailbox_setup(void);
 Result opendsp_request(u16 command, const u16 *args, u16 arg_count, u16 *reply, u16 reply_count);
 
 void opendsp_effects_release(void);
+void opendsp_aac_setup(void);
+void opendsp_aac_release(void);

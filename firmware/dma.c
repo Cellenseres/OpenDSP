@@ -40,6 +40,11 @@ static u16 staging[STAGING_BYTES / 2] __attribute__((aligned(4)));
 static u16 initialized;
 static u16 stuck_channels;
 
+u16 dma_error(void)
+{
+    return stuck_channels;
+}
+
 void pcm8_expand(const u16 *src, s16 *dst, u16 pairs);
 void copy_words(const u16 *src, s16 *dst, u16 count);
 
@@ -47,6 +52,7 @@ static void wait_ahbm(u16 mask)
 {
     u16 n;
     for (n = 0; n < SPIN_LIMIT && (AHBM_STAT & mask); n++) { }
+    if (n == SPIN_LIMIT) stuck_channels |= 0x8000;
 }
 
 static void wait_channel(u16 ch)
