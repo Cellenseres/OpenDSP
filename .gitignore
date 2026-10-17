@@ -9,3 +9,4 @@ examples/soundlab/*.elf
 examples/soundlab/*.smdh
 examples/soundlab/*.map
 toolchain/teak-llvm/
+tests/effects/effects_test
