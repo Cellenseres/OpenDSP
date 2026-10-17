@@ -9,6 +9,7 @@
 #include "audio.h"
 #include "wav.h"
 #include "gfx.h"
+#include <opendsp.h>
 
 #define APP_VERSION "1.1.0"
 
@@ -297,9 +298,15 @@ static void draw_lab(void)
     int active = 0;
     for (int ch = 0; ch < 24; ch++)
         active += ndspChnIsPlaying(ch);
+    opendspStats st = {sizeof st};
+    bool have_stats = R_SUCCEEDED(opendspGetStats(&st, false));
     line(10, "  Frames      " C_VAL "%lu", (unsigned long)audio_frames());
     line(11, "  Dropped     " C_VAL "%lu", (unsigned long)audio_dropped());
     line(12, "  Channels    " C_VAL "%d / 24" C_RESET " playing", active);
+    if (have_stats) {
+        line(13, "  DSP load    " C_VAL "%d %%" C_RESET "  peak " C_VAL "%d %%", (int)(st.load * 100 + 0.5f), (int)(st.load_max * 100 + 0.5f));
+        line(14, "  Late frames " C_VAL "%lu", (unsigned long)st.late_frames);
+    }
     hints(" A start  </> change  B back");
 }
 
