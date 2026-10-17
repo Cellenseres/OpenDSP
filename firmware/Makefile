@@ -9,6 +9,8 @@ PYTHON ?= python3
 CFLAGS := --target=teak -march=teak -O2 -ffreestanding -fno-builtin -nostdlib \
           -integrated-as -Wall -Wno-int-to-pointer-cast
 
+ASFLAGS := --target=teak -march=teak -integrated-as
+
 OBJECTS := crt0.o main.o output.o dma.o voice.o source.o mixer.o reverb.o reverb_kernels.o surround.o mailbox.o stats.o math.o kernels.o
 HEADERS := $(wildcard *.h)
 
@@ -21,7 +23,7 @@ polyphase_table.h: ../tools/gen_polyphase.py
 	$(CC) $(CFLAGS) -c $< -o $@
 
 %.o: %.s
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(ASFLAGS) -c $< -o $@
 
 opendsp.elf: $(OBJECTS) link.ld
 	$(LD) -T link.ld $(OBJECTS) -o $@

@@ -273,7 +273,7 @@ static void run_delay(delay_t *e, s32 **quad)
         if (!quad[ch])
             continue;
         delay_job[3] = (u16)(unsigned)&e->last[ch];
-        for (n = 0; n < F; n += 80) {
+        for (n = 0; n < F; n += 40) {
             delay_job[0] = (u16)(unsigned)&quad[ch][2 * n];
             delay_job[1] = (u16)(unsigned)&delay_buf[ch * F + n];
             output_poll();
@@ -289,24 +289,21 @@ static s32 *quad[4];                    // global: teak-llvm limit
 static const s32 zero_bus[2 * F];
 static u16 return_job[6];
 static u16 output_job[5];
-#define OUTPUT_CHUNK 32
+#define OUTPUT_CHUNK 16
 void output_stage(const u16 *job);
 
 void bus_normalize(s32 *x);
-void bus_return_half(const u16 *job);
+void bus_return_chunk(const u16 *job);
 
-// both halves of a frame
 static void bus_return(u16 *job)
 {
-    u16 k;
-    output_poll();
-    bus_return_half(job);
-    for (k = 0; k < 5; k++)
-        job[k] += 320;                  // 80 samples of s32 at stride 2
-    output_poll();
-    bus_return_half(job);
-    for (k = 0; k < 5; k++)
-        job[k] -= 320;
+    u16 k, n;
+    for (n = 0; n < 4; n++) {
+        output_poll();
+        bus_return_chunk(job);
+        for (k = 0; k < 5; k++) job[k] += 160;
+    }
+    for (k = 0; k < 5; k++) job[k] -= 640;
 }
 
 // s32 per sample, [mix][channel][160]
