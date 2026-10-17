@@ -1,54 +1,40 @@
-# Building the firmware
+# Building OpenDSP
 
-You only need this if you want to change the firmware. The library uses the prebuilt
-`firmware/opendsp.cdc`.
+The library includes a prebuilt firmware. For a normal app you
+only need devkitPro and libctru:
 
-## Compiler
+```sh
+make -C library
+make -C examples/soundlab
+```
 
-The firmware is compiled with teak-llvm, an LLVM fork with a backend for the 3DS DSP. It needs
-the four patches in `toolchain/patches`; without them the firmware does not work on real
-hardware.
+For a CIA, install bannertool and makerom, then run
+`make -C examples/soundlab cia`. Use makerom 0.18.4 or a build with the minor-version
+fix; 0.19.0 writes the wrong version. The build checks the generated CIA.
+Set `MAKEROM=/path/to/makerom` to use a particular executable.
+
+## Changing the firmware
+
+The DSP uses teak-llvm with the four patches in `toolchain/patches`.
+On Linux or WSL, install git, cmake, ninja, python3 and clang, then:
 
 ```sh
 toolchain/build_teak_llvm.sh
+make -C firmware
 ```
 
-The script clones teak-llvm into `toolchain/teak-llvm`, applies the patches and builds clang and
-lld. You need git, cmake, ninja, python3 and clang. The build takes about half an hour.
+The compiler build takes about half an hour. If it's already installed elsewhere,
+pass `TEAK_LLVM=/path/to/build` to make. Keep the resulting `opendsp.cdc`, then rebuild the library and app.
 
-## Firmware, library, demo
+## Teak quirks
 
-```sh
-make -C firmware                   # firmware/opendsp.cdc
-make -C library                    # library/lib/libopendsp.a
-make -C examples/soundlab          # .3dsx
-make -C examples/soundlab cia      # .cia, needs makerom and bannertool
-```
+The compiler is limited, and hardware is stricter than the emulator:
 
-If the compiler is somewhere else, use `make -C firmware TEAK_LLVM=/path/to/build`.
+- Leave an instruction between writing r7 and accessing `[r7+offset]`.
+- Dual memory operands must use X and Y memory. Multiplier tables belong in Y.
+- Protect live multiplier products from interrupts and keep those spans short.
+- Large stack frames, local arrays and functions with more than four arguments
+  can break code generation. Keep DSP C functions small.
 
-## Things to watch out for
-
-On the real hardware, a memory access via `[r7+offset]` directly after an instruction that
-writes r7 still sees the old r7. Patch 0004 takes care of this in compiled code. In
-hand-written assembly you need at least one instruction in between. Emulators don't show this
-bug, so test firmware changes on a console.
-
-teak-llvm also has a few gaps: no 32-bit multiplication (hence `mul16` and shifts), and local
-arrays crash it. That's why many buffers in the firmware are static.
-
-Inner loops that use the multiplier read their second operand from Y memory. Tables they use
-need `YMEM` or `YMEM_RO` (see `voice.h`). An instruction with two memory operands has to read
-one from X and one from Y; emulators let you get away with both in X, the console doesn't.
-
-An interrupt between a multiply and the use of its product corrupts the product on hardware.
-So loops with the multiplier run with interrupts off, in spans shorter than one output sample,
-and the output FIFO is topped up before each one.
-
-teak-llvm crashes on functions with more than four arguments, and `return x == constant;` can
-come out wrong. Assign to a variable first.
-
-## Tests
-
-`make -C tests/effects` builds the reverb for the host and checks impulse response, decay and
-silence. No DSP toolchain needed.
+The patches handle several of these cases, but hand-written assembly still
+needs care. Check changes on hardware as well as in the emulator.
