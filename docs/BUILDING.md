@@ -1,6 +1,6 @@
 # Building OpenDSP
 
-The library includes a prebuilt firmware. For a normal app you
+The library includes a prebuilt firmware and AAC tables. For a normal app you
 only need devkitPro and libctru:
 
 ```sh
@@ -24,7 +24,14 @@ make -C firmware
 ```
 
 The compiler build takes about half an hour. If it's already installed elsewhere,
-pass `TEAK_LLVM=/path/to/build` to make. Keep the resulting `opendsp.cdc`, then rebuild the library and app.
+pass `TEAK_LLVM=/path/to/build` to make. Keep the resulting `opendsp.cdc` and
+`aac_tables.bin` together, then rebuild the library and app.
+
+To regenerate the DSP table source:
+
+```sh
+python3 tools/gen_dsp_tables.py library/source/aac/tables.c firmware/aac
+```
 
 ## Teak quirks
 

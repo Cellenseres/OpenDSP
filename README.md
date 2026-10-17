@@ -37,7 +37,8 @@ has an example, and Sound Lab includes Room, Hall, Plate and Cave presets.
 
 ## AAC
 
-AAC-LC decoding runs on ARM11 and works without ndsp or a running DSP.
+AAC-LC decoding uses the DSP by default when it's available. ARM11 remains
+available for standalone decoding and formats outside the DSP's limits.
 Use `<opendsp/aac.h>`; [AAC.md](docs/AAC.md) has the details.
 
 ## Sound Lab

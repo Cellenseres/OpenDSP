@@ -1,6 +1,6 @@
 # Extension mailbox
 
-OpenDSP's effects and statistics use a mailbox in DSP memory.
+OpenDSP's effects, statistics and AAC controls use a mailbox in DSP memory.
 Apps normally use `opendsp.h`, `opendsp/effects.h` and `opendsp/aac.h`.
 This page is for firmware work or a separate host implementation.
 
@@ -38,17 +38,20 @@ serializes requests and allows 200 ms for a reply.
 | 1 | Configure delay |
 | 2 | Configure reverb |
 | 3 | Read statistics and optionally reset peaks |
+| 0x20-0x23 | Open, close, reset and query an AAC stream |
 
-See `firmware/mailbox.c` for effect arguments. Delay buffers live in FCRAM; reverb delay lines live on the DSP.
-An effect-disable acknowledgement means its buffer can be released.
+See `firmware/mailbox.c` for effect arguments and `firmware/aac_protocol.h` for
+the AAC layout. Delay buffers live in FCRAM; reverb delay lines live on the DSP.
+An effect-disable acknowledgement means its buffer can be released. AAC close
+also waits for DMA to stop before the host can free its arena.
 
 Status 0 is success; 1 is an unknown command, 2 a bad argument, 3 an invalid
 FCRAM address and 4 an unsupported operation. The library maps these to the
 `OPENDSP_ERR_*` results.
 
-Capability bits 0, 1 and 2 mean mailbox, delay and reverb.
+Capability bits 0, 1, 2 and 4 mean mailbox, delay, reverb and DSP AAC.
 The library also reports ARM11 AAC support in bit 16.
 
 Extensions leave ndsp's shared structures and audio pipe unchanged. New
 commands get new numbers; incompatible mailbox changes need a new protocol
-version.
+version. AAC uses its own OpenDSP transport, not Nintendo's binary-pipe codec API.

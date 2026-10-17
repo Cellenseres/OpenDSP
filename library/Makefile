@@ -22,15 +22,15 @@ build/%.o: source/%.c $(wildcard include/*.h include/opendsp/*.h source/*.h) ../
 	@mkdir -p build
 	$(CC) $(CFLAGS) -c $< -o $@
 
-AAC_OBJECTS := build/aac_api.o $(addprefix build/aac/,decoder.o syntax.o spectrum.o filterbank.o tables.o)
+AAC_OBJECTS := build/aac_api.o build/aac_dsp.o $(addprefix build/aac/,decoder.o syntax.o spectrum.o filterbank.o tables.o)
 
-$(AAC_OBJECTS): include/opendsp/aac.h $(wildcard source/aac/*.h)
+$(AAC_OBJECTS): include/opendsp/aac.h $(wildcard source/aac/*.h) ../firmware/aac_protocol.h
 
 build/aac/%.o: source/aac/%.c
 	@mkdir -p build/aac
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/firmware.o: source/firmware.s $(FIRMWARE)
+build/firmware.o: source/firmware.s $(FIRMWARE) ../firmware/aac_tables.bin
 	@mkdir -p build
 	$(CC) $(ARCH) -x assembler-with-cpp -Wa,-I,$(dir $(FIRMWARE)) -c $< -o $@
 

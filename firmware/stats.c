@@ -14,6 +14,10 @@
 stats_t stats;
 static u32 frame_start;
 static u16 started;
+static u32 aac_pending, aac_previous;
+
+void stats_charge_aac(u32 ticks) { aac_pending += ticks; }
+u32 stats_aac_used(void) { return aac_pending; }
 
 // counts down; reread when the high word moved
 static u32 timer_now(void)
@@ -40,14 +44,16 @@ void stats_init(void)
 void stats_frame_begin(u16 backlog)
 {
     u32 now = timer_now();
+    aac_previous = aac_pending;
+    aac_pending = 0;
     stats.frames++;
     if (backlog) {
         stats.late++;
         if (backlog > stats.max_backlog)
             stats.max_backlog = backlog;
     }
-    if (started && frame_start - now < PLAUSIBLE) {
-        u32 period = frame_start - now;
+    u32 period = aac_timer_delta(frame_start, now);
+    if (started && period < PLAUSIBLE) {
         stats.period_last = period;
         if (!stats.period_min || period < stats.period_min)
             stats.period_min = period;
@@ -60,7 +66,9 @@ void stats_frame_begin(u16 backlog)
 
 void stats_frame_end(void)
 {
-    u32 spent = frame_start - timer_now();
+    u32 spent = aac_timer_delta(frame_start, timer_now());
+    stats.render_raw_last = spent;
+    spent += aac_previous;
     if (spent >= PLAUSIBLE)
         return;
     stats.render_last = spent;

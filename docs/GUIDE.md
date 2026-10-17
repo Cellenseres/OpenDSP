@@ -61,12 +61,13 @@ Don't enable ARM aux processing with `ndspAuxSetEnable()` on the same bus;
 that prevents the DSP effect from receiving its input.
 
 Check `opendspGetCapabilities()` if your app can run with another firmware.
-Sound Lab's presets are a useful starting point. Effects and voices share the DSP, so keep an eye on its load as you add more work.
+Sound Lab's presets are a useful starting point. Effects, voices and AAC share
+the DSP, so keep an eye on its load as you add more work.
 
 ## AAC files
 
 Include `<opendsp/aac.h>` and open a decoder with `opendspAacOpen()`.
-The decoder runs on ARM11 and works independently of ndsp.
+The default tries DSP first; ARM11 is also available.
 [AAC.md](AAC.md) has the format limits and API notes.
 
 ## License
