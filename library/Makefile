@@ -22,11 +22,19 @@ build/%.o: source/%.c $(wildcard include/*.h include/opendsp/*.h source/*.h) ../
 	@mkdir -p build
 	$(CC) $(CFLAGS) -c $< -o $@
 
+AAC_OBJECTS := build/aac_api.o $(addprefix build/aac/,decoder.o syntax.o spectrum.o filterbank.o tables.o)
+
+$(AAC_OBJECTS): include/opendsp/aac.h $(wildcard source/aac/*.h)
+
+build/aac/%.o: source/aac/%.c
+	@mkdir -p build/aac
+	$(CC) $(CFLAGS) -c $< -o $@
+
 build/firmware.o: source/firmware.s $(FIRMWARE)
 	@mkdir -p build
 	$(CC) $(ARCH) -x assembler-with-cpp -Wa,-I,$(dir $(FIRMWARE)) -c $< -o $@
 
-lib/libopendsp.a: build/opendsp.o build/embedded.o build/firmware.o build/mailbox.o build/effects.o
+lib/libopendsp.a: build/opendsp.o build/embedded.o build/firmware.o build/mailbox.o build/effects.o $(AAC_OBJECTS)
 	@mkdir -p lib
 	rm -f $@
 	$(AR) rcs $@ $^

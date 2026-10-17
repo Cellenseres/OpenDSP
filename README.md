@@ -2,89 +2,60 @@
 
 # OpenDSP
 
-An open-source replacement for `dspfirm.cdc`, the DSP firmware that libctru's ndsp needs on the
-Nintendo 3DS.
+OpenDSP replaces the DSP firmware used by libctru's ndsp on the Nintendo 3DS.
+Link it into your homebrew and users won't need to dump `dspfirm.cdc` or put it
+on their SD card. It was written from scratch and contains no Nintendo firmware code.
 
-Normally, a homebrew app with sound only works after the user has dumped `dspfirm.cdc` from
-their console onto the SD card. OpenDSP gets linked into your app instead, so there is
-nothing to dump and nothing to copy. ndsp works as before. You only call `opendspInit()` instead
-of `ndspInit()`.
+## Getting started
 
-OpenDSP was written from scratch and contains no code from Nintendo's firmware.
-
-## Usage
-
-Build and install the library (devkitPro with libctru required):
+With devkitPro and libctru installed:
 
 ```sh
 make -C library install
 ```
 
-In your Makefile:
+Add OpenDSP to your Makefile:
 
 ```make
 LIBS    := -lopendsp -lctru -lm
 LIBDIRS := $(PORTLIBS) $(CTRULIB)
 ```
 
-In your code:
+Include `<opendsp.h>`, use `opendspInit()` instead of `ndspInit()`, and call
+`opendspExit()` when you're done. Your other ndsp calls stay the same.
+[The guide](docs/GUIDE.md) covers adding it directly to a project.
 
-```c
-#include <opendsp.h>
+## Audio and effects
 
-opendspInit();   // instead of ndspInit()
-...
-opendspExit();   // instead of ndspExit()
-```
+OpenDSP supports 24 voices, PCM8/PCM16, DSP-ADPCM, mono/stereo, looping buffers,
+all three interpolation modes, filters, mixing, capture and sleep/wake.
+Surround output is currently mixed down to stereo; the rear ratio still works.
 
-More details and other ways to integrate it are in [docs/GUIDE.md](docs/GUIDE.md).
+Reverb and delay run on the DSP through ndsp's two aux buses. Include
+`<opendsp/effects.h>` to configure them. The [guide](docs/GUIDE.md#reverb-and-delay)
+has an example, and Sound Lab includes Room, Hall, Plate and Cave presets.
 
-## Reverb and delay
+## AAC
 
-OpenDSP also has a reverb and a delay that run on the DSP, on ndsp's two aux buses. Voices
-send to them with the usual mix gains, and `ndspAuxSetVolume()` brings the result back.
+AAC-LC decoding runs on ARM11 and works without ndsp or a running DSP.
+Use `<opendsp/aac.h>`; [AAC.md](docs/AAC.md) has the details.
 
-```c
-#include <opendsp/effects.h>
+## Sound Lab
 
-opendspReverbConfig hall = {
-    .struct_size = sizeof(hall),
-    .room_size = 0.9f, .decay_time = 2.5f, .damping = 0.35f,
-    .diffusion = 0.75f, .width = 1.0f, .level = 0.7f,
-};
-opendspReverbSet(0, &hall);
-ndspAuxSetVolume(0, 0.7f);
-```
+[Sound Lab](examples/soundlab) lets you try music, sound effects, WAV files,
+filters and effects. It also shows DSP load.
 
-See [docs/GUIDE.md](docs/GUIDE.md) for the delay and what it all costs.
+Build it with
+`make -C examples/soundlab` or `make -C examples/soundlab cia`.
 
-## Status
-
-Supported: 24 voices, PCM8/PCM16 (mono and stereo), DSP-ADPCM, looping wave buffers, playback
-rates up to 4x, all three interpolation modes, the per-voice filters, mix gains, the aux
-settings, master volume, output modes, clipping, capture and sleep mode. Plus the reverb and
-delay above.
-
-Missing: AAC decoding. Surround output is mixed down to stereo, though the rear ratio works.
-
-Tested on a New 3DS with Luma3DS.
-
-## Demo
-
-`examples/soundlab` is a small app with music, sound effects, a WAV player, mixer settings and
-a reverb and delay page. The DSP lab shows how busy the DSP is. All of it runs on OpenDSP.
-
-## Building the firmware
-
-The library already contains a prebuilt `firmware/opendsp.cdc`. You only have to build it
-yourself if you want to change the firmware. See [docs/BUILDING.md](docs/BUILDING.md).
+Tested on a New Nintendo 3DS with Luma3DS. The library includes the firmware;
+see [BUILDING.md](docs/BUILDING.md) if you want to change it.
 
 ## License
 
-BSD 2-Clause. If you ship OpenDSP inside a binary, include the copyright notice and the
-license text in your credits or documentation.
+BSD 2-Clause. Include the copyright notice and license text when distributing OpenDSP.
 
-Made by Cellenseres. Thanks to Gericom for teak-llvm, wwylele for teakra, and the
-devkitPro and libctru developers.
+Made by Cellenseres. Thanks to Gericom for teak-llvm, wwylele for teakra,
+and the devkitPro and libctru developers.
 
 OpenDSP is not affiliated with Nintendo.

@@ -1,5 +1,7 @@
 firmware/*.o
 firmware/*.elf
+firmware/*.map
+firmware/aac/*.o
 library/build/
 library/lib/
 examples/soundlab/build/
@@ -10,3 +12,6 @@ examples/soundlab/*.smdh
 examples/soundlab/*.map
 toolchain/teak-llvm/
 tests/effects/effects_test
+tests/host/
+tests/fixtures/aac/
+__pycache__/
