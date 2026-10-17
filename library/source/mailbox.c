@@ -85,7 +85,7 @@ Result opendspGetCapabilities(u32 *caps)
     if (!caps)
         return OPENDSP_ERR_ARGUMENT;
     if (!opendsp_running) {
-        *caps = 0;
+        *caps = OPENDSP_CAP_AAC_ARM11;
         return 0;
     }
     LightLock_Lock(&lock);
@@ -94,7 +94,7 @@ Result opendspGetCapabilities(u32 *caps)
         firmware = (((u32)box[EXT_CAPS_HI] << 16) | box[EXT_CAPS_LO]) & ~(u32)EXT_CAP_MAILBOX;
     LightLock_Unlock(&lock);
     // the firmware bits match OPENDSP_CAP_*
-    *caps = firmware | (box ? OPENDSP_CAP_FIRMWARE : 0);
+    *caps = OPENDSP_CAP_AAC_ARM11 | firmware | (box ? OPENDSP_CAP_FIRMWARE : 0);
     return 0;
 }
 

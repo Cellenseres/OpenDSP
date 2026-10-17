@@ -22,9 +22,10 @@ extern "C" {
 #define OPENDSP_ERR_TIMEOUT     MAKERESULT(RL_TEMPORARY, RS_NOTFOUND, RM_DSP, RD_TIMEOUT)
 
 // opendspGetCapabilities() bits
-#define OPENDSP_CAP_FIRMWARE (1u << 0)      // OpenDSP firmware is running
-#define OPENDSP_CAP_DELAY    (1u << 1)
-#define OPENDSP_CAP_REVERB   (1u << 2)
+#define OPENDSP_CAP_FIRMWARE  (1u << 0)     // OpenDSP firmware is running
+#define OPENDSP_CAP_DELAY     (1u << 1)
+#define OPENDSP_CAP_REVERB    (1u << 2)
+#define OPENDSP_CAP_AAC_ARM11 (1u << 16)    // AAC decoder in this library
 
 // Replaces ndspInit().
 Result opendspInit(void);
@@ -38,7 +39,7 @@ void opendspExit(void);
 // Checks for a DSP1 header.
 bool opendspCheckImage(const void *image, u32 size);
 
-// Features of the running firmware.
+// Features of the running firmware and of this library.
 Result opendspGetCapabilities(u32 *caps);
 
 // Firmware version, major << 8 | minor.
