@@ -47,7 +47,7 @@ Use `<opendsp/aac.h>`; [AAC.md](docs/AAC.md) has the details.
 filters and effects. It also shows DSP load. Put your music in
 `sdmc:/3ds/opendsp-lab/` and press X in the player to switch AAC backends.
 
-Build it with
+[CIA and 3DSX downloads](dist/soundlab) are included. You can also build it with
 `make -C examples/soundlab` or `make -C examples/soundlab cia`.
 
 Tested on a New Nintendo 3DS with Luma3DS. The library includes the firmware;
