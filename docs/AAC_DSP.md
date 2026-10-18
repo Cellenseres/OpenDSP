@@ -24,7 +24,9 @@ interface, so replacing `dspfirm.cdc` alone won't add AAC support to an existing
 
 ## Playback
 
-Decode on a streaming thread and keep several frames queued.
+Decode on a streaming thread and keep several frames queued. Sound Lab starts
+with four 1024-frame buffers ready and uses DSP by default. Press X in its player
+to select ARM11 instead.
 
 The mixer has priority. Heavy audio load can return `OPENDSP_AAC_ERR_BUSY`
 without consuming input. A decode timeout returns `ERR_TIMEOUT`; reset before
