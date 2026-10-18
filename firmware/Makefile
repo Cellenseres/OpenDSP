@@ -11,7 +11,7 @@ CFLAGS := --target=teak -march=teak -O2 -ffreestanding -fno-builtin -nostdlib \
 ASFLAGS := --target=teak -march=teak -integrated-as
 
 OBJECTS := crt0.o main.o output.o dma.o voice.o source.o mixer.o reverb.o reverb_kernels.o surround.o mailbox.o stats.o math.o kernels.o
-OBJECTS += aac/aac_parse.o aac/aac_stages.o aac/aac_dequant.o \
+OBJECTS += aac/aac_parse.o aac/aac_stages.o aac/aac_dequant.o aac/aac_tns.o \
            aac/aac_fb.o aac/aac_tables_dsp.o aac/aac_fft.o aac/aac_window.o \
            aac/aac_bits.o aac/aac_arith.o aac/stream.o aac/task.o
 HEADERS := $(wildcard *.h aac/*.h)
