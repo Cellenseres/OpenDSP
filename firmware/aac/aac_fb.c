@@ -6,7 +6,7 @@ void aac_imdct_norm(u16 *job);
 void aac_imdct_head(const u16 *job);
 void aac_fft_stages(const u16 *job);
 void aac_imdct_post(const u16 *job);
-void aac_window_seg(const u16 *job);
+void aac_window_emit(const u16 *job);
 void aac_pcm_out(const u16 *job);
 void aac_add_sat(const u16 *job);
 void clear_words(void *dst, u16 words);
@@ -19,6 +19,7 @@ aac_fb_t aac_fb;
 
 static u16 job[10];
 static u16 fz, fn, fshift;      // current transform: z, n, shift
+static u16 pcm_target, pcm_overlap;
 static u16 wstep, wvariant;     // window direction (1 or 0xFFFF), flat bit
 
 // imdct() of x into fz; 0 when silent
@@ -58,10 +59,17 @@ static u16 imdct(u16 x, u16 n)
     return 1;
 }
 
-// imdct() outputs y[y .. end) as s32 at out, windowed from win on (step wstep)
-// or flat. The four quarters of y read z forwards and backwards:
-//   y[2k], y[2k+1] = RE(H+k), -IM(H-1-k) | IM(k), -RE(N-1-k) |
-//                    IM(H+k), -RE(H-1-k) | -RE(k), IM(N-1-k)
+// Keep this setup out of window_range's compiler-limited stack frame.
+__attribute__((noinline)) static void emit_window(u16 out)
+{
+    job[6] = 0;
+    if (pcm_target) {
+        job[6] = pcm_overlap + out - aac_fb.t;
+        job[9] = pcm_target + ((out - aac_fb.t) >> 1);
+    }
+    aac_window_emit(job);
+}
+
 static void window_range(u16 y, u16 end, u16 win, u16 out)
 {
     u16 n4 = fn >> 2, h = fn >> 3, qbits = fn == 2048 ? 9 : 6;
@@ -92,11 +100,10 @@ static void window_range(u16 y, u16 end, u16 win, u16 out)
             job[3] = wstep;
             job[4] = c;
             job[5] = fshift;
-            job[6] = 0;
             job[7] = out;
             job[8] = variant | wvariant;
             aac_yield();
-            aac_window_seg(job);
+            emit_window(out);
             fwd += c << 2;
             bwd -= c << 2;
             if (wstep == 1)
@@ -110,12 +117,12 @@ static void window_range(u16 y, u16 end, u16 win, u16 out)
     }
 }
 
-static void pcm_out(u16 t, u16 overlap, u16 pcm)
+static void pcm_out(u16 t, u16 overlap, u16 pcm, u16 count)
 {
     job[0] = t;
     job[1] = overlap;
     job[2] = pcm;
-    job[3] = 1024;
+    job[3] = count;
     aac_pcm_out(job);
 }
 
@@ -139,7 +146,7 @@ static void short_blocks(u16 x, u16 overlap, u16 pcm, u16 mode)
         job[2] = 256;
         aac_add_sat(job);
     }
-    pcm_out(t, overlap, pcm);
+    pcm_out(t, overlap, pcm, 1024);
     copy_words((const u16 *)(unsigned)(t + 2048), (s16 *)(unsigned)overlap, 2048);
 }
 
@@ -148,6 +155,7 @@ void aac_fb_channel(u16 x, u16 overlap, u16 pcm, u16 mode)
     u16 seq = mode & 3, shape = (mode >> 2) & 1, prev = (mode >> 3) & 1, t = aac_fb.t;
     u16 lp = prev ? aac_fb.kbd_long : aac_fb.sine_long, lc = shape ? aac_fb.kbd_long : aac_fb.sine_long;
     u16 sp = prev ? aac_fb.kbd_short : aac_fb.sine_short, sc = shape ? aac_fb.kbd_short : aac_fb.sine_short;
+    pcm_target = pcm_overlap = 0;
     fz = aac_fb.z;
     if (seq == 2) {
         short_blocks(x, overlap, pcm, mode);
@@ -156,22 +164,25 @@ void aac_fb_channel(u16 x, u16 overlap, u16 pcm, u16 mode)
     fn = 2048;
     if (!imdct(x, 2048)) {
         clear_words((void *)(unsigned)t, 2048);
-        pcm_out(t, overlap, pcm);
+        pcm_out(t, overlap, pcm, 1024);
         clear_words((void *)(unsigned)overlap, 2048);
         return;
     }
-    // first half into t, then PCM with the old overlap
+    // Long windows combine windowing and old overlap directly into PCM.
+    pcm_target = pcm;
+    pcm_overlap = overlap;
     wstep = 1;
     wvariant = 0;
     if (seq == 3) {
         clear_words((void *)(unsigned)t, 896);
+        pcm_out(t, overlap, pcm, 448);
         window_range(448, 576, sp, t + 896);
         wvariant = 2;
         window_range(576, 1024, 0, t + 1152);
     } else {
         window_range(0, 1024, lp, t);
     }
-    pcm_out(t, overlap, pcm);
+    pcm_target = pcm_overlap = 0;
     // second half is the new overlap
     wstep = 0xFFFF;
     if (seq == 1) {
