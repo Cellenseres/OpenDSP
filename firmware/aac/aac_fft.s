@@ -48,6 +48,297 @@ aac_fft_stages:
     mov     0x3, cfgi               // [r0++s]: b re high -> b im low
     mov     0x2, cfgj               // [r4++s]: next twiddle
     set     0x0800, mod0            // product shift 1
+// Fixed early stages for the supported 64/512-point transforms.
+.Lfs_fixed4:
+    mov [r7+0x0003s7], a0
+    shfi a0, a0, -2
+    mov a0l, [r7+0x0007s7]
+    mov [r7+0x0000s7], a0
+    mov a0l, r2
+    add 0x8, a0
+    mov a0l, r5
+    add 0x1, a0
+    mov a0l, r0
+    mov [r7+0x0001s7], a0
+    add 0x0, a0
+    mov a0l, r4
+    mov 0x10, r6
+.Lfs_fixed4_group:
+    mov 0x1, r1
+    dint
+    bkrep r1, .Lfs_fixed4_end
+    clr     a0, always
+    clr     a1, always
+    mpysu   [r4], [r0--], a0        // p = wr brl
+    maa     [r4++], [r0++s], a0     // a0 = floor(wr brl), p = wr brh
+    macsu   [r4], [r0--], a0        // a0 = mul_q15(br, wr), p = wi bil
+    maa     [r4], [r0--], a1        // a1 = floor(wi bil), p = wi bih
+    macsu   [r4], [r0--], a1        // a1 = mul_q15(bi, wi), p = wi brl
+    sub     a1, a0                  // a0 = tr
+    clr     a1, always
+    maa     [r4--], [r0++s], a1     // a1 = floor(wi brl), p = wi brh
+    macsu   [r4], [r0--], a1        // a1 += 2 wi brh, p = wr bil
+    maa     [r4++s], [r0++s], a1    // a1 += floor(wr bil), p = wr bih
+    add     p*, a1                  // a1 = ti
+    mov     [arrn2+ars0], b0        // ar
+    add     b0, a0                  // a0 = ar + tr
+    shfi    b0, b0, +1
+    sub     a0, b0                  // b0 = ar - tr
+    shfi    a0, a0, -1
+    shfi    b0, b0, -1
+    mov     a0, [arrn2+ars0]
+    mov     b0, [arrn3+ars0]
+    modr    [r2++]
+    modr    [r2++]
+    modr    [r5++]
+    modr    [r5++]
+    mov     [arrn2+ars0], b1        // ai
+    add     b1, a1                  // a1 = ai + ti
+    shfi    b1, b1, +1
+    sub     a1, b1                  // b1 = ai - ti
+    shfi    a1, a1, -1
+    shfi    b1, b1, -1
+    mov     a1, [arrn2+ars0]
+    mov     b1, [arrn3+ars0]
+    modr    [r2++]
+    modr    [r2++]
+    modr    [r5++]
+    modr    [r5++]
+.Lfs_fixed4_end:
+    eint
+    addv 0x8, r2
+    addv 0x8, r5
+    addv 0x8, r0
+    addv 0xfffc, r4
+    modr [r6--]
+    mov r6, a0
+    cmpv 0x0, a0l
+    br .Lfs_fixed4_continue, neq
+    call aac_yield, always
+    mov 0x10, r6
+.Lfs_fixed4_continue:
+    mov [r7+0x0007s7], a0
+    sub 0x1, a0
+    mov a0l, [r7+0x0007s7]
+    br .Lfs_fixed4_group, neq
+.Lfs_fixed8:
+    mov [r7+0x0003s7], a0
+    shfi a0, a0, -3
+    mov a0l, [r7+0x0007s7]
+    mov [r7+0x0000s7], a0
+    mov a0l, r2
+    add 0x10, a0
+    mov a0l, r5
+    add 0x1, a0
+    mov a0l, r0
+    mov [r7+0x0001s7], a0
+    add 0x4, a0
+    mov a0l, r4
+    mov 0x8, r6
+.Lfs_fixed8_group:
+    mov 0x3, r1
+    dint
+    bkrep r1, .Lfs_fixed8_end
+    clr     a0, always
+    clr     a1, always
+    mpysu   [r4], [r0--], a0        // p = wr brl
+    maa     [r4++], [r0++s], a0     // a0 = floor(wr brl), p = wr brh
+    macsu   [r4], [r0--], a0        // a0 = mul_q15(br, wr), p = wi bil
+    maa     [r4], [r0--], a1        // a1 = floor(wi bil), p = wi bih
+    macsu   [r4], [r0--], a1        // a1 = mul_q15(bi, wi), p = wi brl
+    sub     a1, a0                  // a0 = tr
+    clr     a1, always
+    maa     [r4--], [r0++s], a1     // a1 = floor(wi brl), p = wi brh
+    macsu   [r4], [r0--], a1        // a1 += 2 wi brh, p = wr bil
+    maa     [r4++s], [r0++s], a1    // a1 += floor(wr bil), p = wr bih
+    add     p*, a1                  // a1 = ti
+    mov     [arrn2+ars0], b0        // ar
+    add     b0, a0                  // a0 = ar + tr
+    shfi    b0, b0, +1
+    sub     a0, b0                  // b0 = ar - tr
+    shfi    a0, a0, -1
+    shfi    b0, b0, -1
+    mov     a0, [arrn2+ars0]
+    mov     b0, [arrn3+ars0]
+    modr    [r2++]
+    modr    [r2++]
+    modr    [r5++]
+    modr    [r5++]
+    mov     [arrn2+ars0], b1        // ai
+    add     b1, a1                  // a1 = ai + ti
+    shfi    b1, b1, +1
+    sub     a1, b1                  // b1 = ai - ti
+    shfi    a1, a1, -1
+    shfi    b1, b1, -1
+    mov     a1, [arrn2+ars0]
+    mov     b1, [arrn3+ars0]
+    modr    [r2++]
+    modr    [r2++]
+    modr    [r5++]
+    modr    [r5++]
+.Lfs_fixed8_end:
+    eint
+    addv 0x10, r2
+    addv 0x10, r5
+    addv 0x10, r0
+    addv 0xfff8, r4
+    modr [r6--]
+    mov r6, a0
+    cmpv 0x0, a0l
+    br .Lfs_fixed8_continue, neq
+    call aac_yield, always
+    mov 0x8, r6
+.Lfs_fixed8_continue:
+    mov [r7+0x0007s7], a0
+    sub 0x1, a0
+    mov a0l, [r7+0x0007s7]
+    br .Lfs_fixed8_group, neq
+.Lfs_fixed16:
+    mov [r7+0x0003s7], a0
+    shfi a0, a0, -4
+    mov a0l, [r7+0x0007s7]
+    mov [r7+0x0000s7], a0
+    mov a0l, r2
+    add 0x20, a0
+    mov a0l, r5
+    add 0x1, a0
+    mov a0l, r0
+    mov [r7+0x0001s7], a0
+    add 0xc, a0
+    mov a0l, r4
+    mov 0x4, r6
+.Lfs_fixed16_group:
+    mov 0x7, r1
+    dint
+    bkrep r1, .Lfs_fixed16_end
+    clr     a0, always
+    clr     a1, always
+    mpysu   [r4], [r0--], a0        // p = wr brl
+    maa     [r4++], [r0++s], a0     // a0 = floor(wr brl), p = wr brh
+    macsu   [r4], [r0--], a0        // a0 = mul_q15(br, wr), p = wi bil
+    maa     [r4], [r0--], a1        // a1 = floor(wi bil), p = wi bih
+    macsu   [r4], [r0--], a1        // a1 = mul_q15(bi, wi), p = wi brl
+    sub     a1, a0                  // a0 = tr
+    clr     a1, always
+    maa     [r4--], [r0++s], a1     // a1 = floor(wi brl), p = wi brh
+    macsu   [r4], [r0--], a1        // a1 += 2 wi brh, p = wr bil
+    maa     [r4++s], [r0++s], a1    // a1 += floor(wr bil), p = wr bih
+    add     p*, a1                  // a1 = ti
+    mov     [arrn2+ars0], b0        // ar
+    add     b0, a0                  // a0 = ar + tr
+    shfi    b0, b0, +1
+    sub     a0, b0                  // b0 = ar - tr
+    shfi    a0, a0, -1
+    shfi    b0, b0, -1
+    mov     a0, [arrn2+ars0]
+    mov     b0, [arrn3+ars0]
+    modr    [r2++]
+    modr    [r2++]
+    modr    [r5++]
+    modr    [r5++]
+    mov     [arrn2+ars0], b1        // ai
+    add     b1, a1                  // a1 = ai + ti
+    shfi    b1, b1, +1
+    sub     a1, b1                  // b1 = ai - ti
+    shfi    a1, a1, -1
+    shfi    b1, b1, -1
+    mov     a1, [arrn2+ars0]
+    mov     b1, [arrn3+ars0]
+    modr    [r2++]
+    modr    [r2++]
+    modr    [r5++]
+    modr    [r5++]
+.Lfs_fixed16_end:
+    eint
+    addv 0x20, r2
+    addv 0x20, r5
+    addv 0x20, r0
+    addv 0xfff0, r4
+    modr [r6--]
+    mov r6, a0
+    cmpv 0x0, a0l
+    br .Lfs_fixed16_continue, neq
+    call aac_yield, always
+    mov 0x4, r6
+.Lfs_fixed16_continue:
+    mov [r7+0x0007s7], a0
+    sub 0x1, a0
+    mov a0l, [r7+0x0007s7]
+    br .Lfs_fixed16_group, neq
+.Lfs_fixed32:
+    mov [r7+0x0003s7], a0
+    shfi a0, a0, -5
+    mov a0l, [r7+0x0007s7]
+    mov [r7+0x0000s7], a0
+    mov a0l, r2
+    add 0x40, a0
+    mov a0l, r5
+    add 0x1, a0
+    mov a0l, r0
+    mov [r7+0x0001s7], a0
+    add 0x1c, a0
+    mov a0l, r4
+    mov 0x2, r6
+.Lfs_fixed32_group:
+    mov 0xf, r1
+    dint
+    bkrep r1, .Lfs_fixed32_end
+    clr     a0, always
+    clr     a1, always
+    mpysu   [r4], [r0--], a0        // p = wr brl
+    maa     [r4++], [r0++s], a0     // a0 = floor(wr brl), p = wr brh
+    macsu   [r4], [r0--], a0        // a0 = mul_q15(br, wr), p = wi bil
+    maa     [r4], [r0--], a1        // a1 = floor(wi bil), p = wi bih
+    macsu   [r4], [r0--], a1        // a1 = mul_q15(bi, wi), p = wi brl
+    sub     a1, a0                  // a0 = tr
+    clr     a1, always
+    maa     [r4--], [r0++s], a1     // a1 = floor(wi brl), p = wi brh
+    macsu   [r4], [r0--], a1        // a1 += 2 wi brh, p = wr bil
+    maa     [r4++s], [r0++s], a1    // a1 += floor(wr bil), p = wr bih
+    add     p*, a1                  // a1 = ti
+    mov     [arrn2+ars0], b0        // ar
+    add     b0, a0                  // a0 = ar + tr
+    shfi    b0, b0, +1
+    sub     a0, b0                  // b0 = ar - tr
+    shfi    a0, a0, -1
+    shfi    b0, b0, -1
+    mov     a0, [arrn2+ars0]
+    mov     b0, [arrn3+ars0]
+    modr    [r2++]
+    modr    [r2++]
+    modr    [r5++]
+    modr    [r5++]
+    mov     [arrn2+ars0], b1        // ai
+    add     b1, a1                  // a1 = ai + ti
+    shfi    b1, b1, +1
+    sub     a1, b1                  // b1 = ai - ti
+    shfi    a1, a1, -1
+    shfi    b1, b1, -1
+    mov     a1, [arrn2+ars0]
+    mov     b1, [arrn3+ars0]
+    modr    [r2++]
+    modr    [r2++]
+    modr    [r5++]
+    modr    [r5++]
+.Lfs_fixed32_end:
+    eint
+    addv 0x40, r2
+    addv 0x40, r5
+    addv 0x40, r0
+    addv 0xffe0, r4
+    modr [r6--]
+    mov r6, a0
+    cmpv 0x0, a0l
+    br .Lfs_fixed32_continue, neq
+    call aac_yield, always
+    mov 0x2, r6
+.Lfs_fixed32_continue:
+    mov [r7+0x0007s7], a0
+    sub 0x1, a0
+    mov a0l, [r7+0x0007s7]
+    br .Lfs_fixed32_group, neq
+    mov 0x40, a0
+    mov a0l, [r7+0x0004s7]
 .Lfs_stage:
     mov     [r7+0x0002s7], a0
     mov     a0l, [r7+0x000as7]      // yield budget spans small FFT groups
