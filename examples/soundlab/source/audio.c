@@ -8,6 +8,7 @@
 #include <opendsp.h>
 #include <opendsp/effects.h>
 #include "audio.h"
+#include "wav.h"
 
 #define SAMPLE_RATE 32728.0f
 #define TABLE_LEN   64
@@ -545,6 +546,7 @@ static s16 *capture_buf;
 static void on_frame(void *arg)
 {
     (void)arg;
+    wav_frame_notify();
     frames_seen++;
     LightEvent_Signal(&frame_event);
 }
