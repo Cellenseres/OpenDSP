@@ -9,3 +9,4 @@ SELECT stops all sounds; START quits.
 
 Build from this folder with `make` for a 3DSX or `make cia` for an installable CIA.
 The CIA build needs bannertool and makerom; see [BUILDING.md](../../docs/BUILDING.md).
+[Ready-made builds](../../dist/soundlab) are also included.

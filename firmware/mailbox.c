@@ -10,7 +10,7 @@
 #include "aac_protocol.h"
 
 #define BOX ((vu16 *)EXT_BASE)
-#define FIRMWARE_VERSION 0x0101
+#define FIRMWARE_VERSION 0x0102
 #define CAPABILITIES (EXT_CAP_MAILBOX | EXT_CAP_DELAY | EXT_CAP_REVERB | AAC_CAP_DSP)
 
 void mailbox_init(void)
