@@ -10,6 +10,7 @@
 #include "wav.h"
 #include "gfx.h"
 #include <opendsp.h>
+#include <opendsp/aac.h>
 
 #define APP_VERSION "1.1.0"
 
@@ -61,7 +62,7 @@ static int page = P_MAIN, cursor[P_COUNT], items;
 static bool dirty = true, quit;
 static char message[80];
 
-static const char *main_items[] = {"Music: \"Teak Street\"", "Sound effects", "WAV player (SD card)",
+static const char *main_items[] = {"Music: \"Teak Street\"", "Sound effects", "WAV / AAC player (SD card)",
                                    "Touch keyboard", "Mixer & filters", "Reverb & delay", "DSP lab", "About", "Exit"};
 #define MAIN_ITEMS 9
 
@@ -118,14 +119,15 @@ static void draw_sfx(void)
 
 static void draw_wav(void)
 {
-    header("WAV player");
+    header("WAV / AAC player");
     if (!wav_count()) {
         items = 1;
         item(3, cursor[page] == 0, "Rescan SD card", "");
-        line(5, "  No .wav files found. Copy some to");
-        line(6, C_VAL "  SD:/3ds/opendsp-lab/");
-        line(8, C_DIM "  PCM 8/16-bit, mono or stereo,");
-        line(9, C_DIM "  up to 130 kHz.");
+        line(5, "  No .wav or .aac files found. Copy");
+        line(6, "  some to " C_VAL "SD:/3ds/opendsp-lab/");
+        line(8, C_DIM "  WAV: PCM 8/16-bit, up to 130 kHz.");
+        line(9, C_DIM "  AAC: AAC-LC in ADTS, mono/stereo,");
+        line(10, C_DIM "  ARM11 or Teak DSP backend.");
         hints(" A rescan   B back");
         return;
     }
@@ -133,6 +135,7 @@ static void draw_wav(void)
     item(3, cursor[page] == 0, "Stop", "");
     item(4, cursor[page] == 1, "Loop", on_off(wav_loop()));
     item(5, cursor[page] == 2, "Rescan SD card", "");
+    line(6, C_DIM "  AAC: %s  [X]", wav_backend() == OPENDSP_AAC_BACKEND_DSP ? "Teak DSP" : "ARM11 (CPU)");
     int first = cursor[page] - 3 - 6;
     if (first < 0)
         first = 0;
@@ -150,13 +153,26 @@ static void draw_wav(void)
         for (int k = 0; k < 30; k++)
             bar[k] = k < n ? '#' : '.';
         bar[30] = 0;
+        float load = wav_decode_load();
+        if (load >= 0)
+            line(21, "  " C_DIM "CPU decode (est.): %.1f%%", load * 100);
+        else if (wav_active_backend() == OPENDSP_AAC_BACKEND_DSP)
+            line(21, "  " C_DIM "CPU: I/O + transport (unmeasured)");
+        else
+            line(21, "  " C_DIM "CPU: PCM streaming (unmeasured)");
         line(23, "  " C_OK "%s", wav_info());
         line(24, "  " C_VAL "%s", bar);
     } else {
+        line(21, "  %.36s", wav_error());
         line(23, "");
         line(24, "");
     }
-    hints(" A play   B back   (pitch: Music)");
+    opendspStats st = {sizeof st};
+    if (R_SUCCEEDED(opendspGetStats(&st, false)))
+        line(22, "  DSP total: " C_VAL "%.1f%%" C_RESET "  peak " C_VAL "%.1f%%", st.load * 100, st.load_max * 100);
+    else
+        line(22, "  " C_DIM "DSP total: unavailable");
+    hints(" A play   X AAC backend   B back");
 }
 
 // keyboard: two octaves, white keys 2 columns wide
@@ -512,6 +528,10 @@ static void input(void)
             sfx_play(*c);
         break;
     case P_WAV:
+        if (down & KEY_X) {
+            wav_set_backend(wav_backend() == OPENDSP_AAC_BACKEND_DSP ? OPENDSP_AAC_BACKEND_ARM11 : OPENDSP_AAC_BACKEND_DSP);
+            dirty = true;
+        }
         if (!wav_count()) {
             if (down & KEY_A) {
                 wav_scan();

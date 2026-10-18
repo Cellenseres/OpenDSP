@@ -13,7 +13,7 @@ Result result = opendspAacOpen(&decoder, NULL);
 
 Once opened, call `opendspAacDecode()` from your streaming thread and queue the
 PCM with ndsp. Close the decoder with `opendspAacClose()` before shutting down
-OpenDSP.
+OpenDSP. Sound Lab's [player](../examples/soundlab/source/wav.c) is a working example.
 
 ## Choosing a backend
 

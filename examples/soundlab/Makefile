@@ -17,6 +17,8 @@ APP_TITLE       := OpenDSP Sound Lab
 APP_DESCRIPTION := Music, sound effects and DSP demos on OpenDSP
 APP_AUTHOR      := Cellenseres
 ICON            := $(TOPDIR)/meta/icon.png
+MAKEROM         ?= makerom
+PYTHON          ?= python3
 
 ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 CFLAGS   := -g -Wall -O2 -mword-relocations -ffunction-sections $(ARCH) $(INCLUDE) -D__3DS__
@@ -48,9 +50,10 @@ library:
 
 cia: all
 	bannertool makebanner -i meta/banner.png -a meta/banner.wav -o $(BUILD)/banner.bnr
-	makerom -f cia -o $(TARGET).cia -target t -exefslogo -rsf meta/soundlab.rsf \
+	$(MAKEROM) -f cia -o $(TARGET).cia -target t -exefslogo -rsf meta/soundlab.rsf \
 		-elf $(TARGET).elf -icon $(TARGET).smdh -banner $(BUILD)/banner.bnr \
-		-major 1 -minor 1 -micro 0
+		-ver 1040
+	$(PYTHON) ../../tools/check_cia.py $(TARGET).cia 1.1.0
 
 clean:
 	@rm -rf $(BUILD) $(TARGET).3dsx $(TARGET).smdh $(TARGET).elf $(TARGET).cia
@@ -58,7 +61,7 @@ clean:
 else
 
 $(OUTPUT).3dsx: $(OUTPUT).elf $(OUTPUT).smdh
-$(OUTPUT).elf: $(OFILES)
+$(OUTPUT).elf: $(OFILES) $(OPENDSP)/lib/libopendsp.a
 
 -include $(DEPSDIR)/*.d
 

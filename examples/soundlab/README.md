@@ -1,12 +1,11 @@
 # Sound Lab
 
-Demo app for OpenDSP: a short synth song, sound effects in PCM16, PCM8 and DSP-ADPCM, a WAV
-player for files in `SD:/3ds/opendsp-lab/`, a touch keyboard and mixer settings. The top screen
-shows the DSP output.
+A small OpenDSP demo with music, a touch keyboard, sound effects, filters,
+reverb and delay. It also plays WAV and AAC files from `sdmc:/3ds/opendsp-lab/`.
 
-```sh
-make          # .3dsx
-make cia      # .cia, needs makerom and bannertool
-```
+AAC uses the DSP by default. Press X in the player to switch to ARM11.
+The player shows the active backend and total DSP load.
+SELECT stops all sounds; START quits.
 
-SELECT stops all sounds, START quits.
+Build from this folder with `make` for a 3DSX or `make cia` for an installable CIA.
+The CIA build needs bannertool and makerom; see [BUILDING.md](../../docs/BUILDING.md).
