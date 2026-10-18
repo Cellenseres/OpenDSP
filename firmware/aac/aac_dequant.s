@@ -75,8 +75,7 @@ aac_dequant_span:
     mov a1l, r6
 .Ldq_scale:
     mov r3, a1
-    mov 0x10, b0
-    call aac_mul_shift, always
+    call aac_mul_q16, always
     mov r6, a1
     call aac_shift_sat, always
     mov r5, a1
