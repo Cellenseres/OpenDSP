@@ -156,6 +156,7 @@ aac_decode_band:
     mov     [r0], r6                // position
     clr     a0, always
     mov     a0l, [r7+0x0006s7]
+    call    .Ldb_peek, always
     mov     [r7+0x0002s7], a0
     cmp     0x4, a0
     br      .Ldb_quads, le
@@ -328,11 +329,18 @@ aac_decode_band:
 
 // a0 = next Huffman symbol, a1 = fresh window behind it; b0 clobbered
 .Ldb_cw:
+    // A corrupt stream may advance through the 16-Kbit wrapped input boundary.
+    // Then cached sign-bit leftovers refer to padding, not wrapped word zero.
+    mov     r6, a0
+    and     0x3fff, a0
+    cmp     0x4, a0
+    br      .Ldb_cw_cached, ge
+    call    .Ldb_peek, always
+.Ldb_cw_cached:
     mov     0x8, a0
     mov     a0l, [r7+0x0007s7]
     mov     [r7+0x0001s7], a0
     mov     a0l, [r7+0x0008s7]
-    call    .Ldb_peek, always
     mov     a1, a0
     shfi    a0, a0, -8
     and     0x00ff, a0
@@ -412,5 +420,8 @@ aac_decode_band:
     mov     0x1, a0
     shfc    a0, a0, always
     add     [r7+0x0007s7], a0       // (1 << (n + 4)) + bits
+    pusha   a0
+    call    .Ldb_peek, always       // escape consumed a variable-size suffix
+    popa    a0
 .Ldb_esc_none:
     ret     always
