@@ -43,8 +43,9 @@ Use `<opendsp/aac.h>`; [AAC.md](docs/AAC.md) has the details.
 
 ## Sound Lab
 
-[Sound Lab](examples/soundlab) lets you try music, sound effects, WAV files,
-filters and effects. It also shows DSP load.
+[Sound Lab](examples/soundlab) lets you try music, sound effects, WAV/AAC files,
+filters and effects. It also shows DSP load. Put your music in
+`sdmc:/3ds/opendsp-lab/` and press X in the player to switch AAC backends.
 
 Build it with
 `make -C examples/soundlab` or `make -C examples/soundlab cia`.
