@@ -248,7 +248,7 @@ Result aac_backend_decode(aac_dsp_backend *d, const void *input, size_t bytes, s
     memcpy(d->memory + AAC_INPUT_OFFSET + slot * AAC_INPUT_BYTES, p, len);
     if (len & 1)
         d->memory[AAC_INPUT_OFFSET + slot * AAC_INPUT_BYTES + len] = 0;
-    DSP_FlushDataCache(d->memory + AAC_INPUT_OFFSET + slot * AAC_INPUT_BYTES, AAC_INPUT_BYTES);
+    DSP_FlushDataCache(d->memory + AAC_INPUT_OFFSET + slot * AAC_INPUT_BYTES, (len + 31) & ~31u);
     control[16 + slot * 4] = len;
     __dsb();
     control[3] = d->sequence + 1;
