@@ -151,3 +151,50 @@ aac_shift_sat:
 .Lar_shift_done:
     pop sv
     ret always
+
+// Exact floor(a*b/2^15), truncated to signed 32 bits. No dynamic shifts.
+.global aac_mul_q15
+aac_mul_q15:
+    push y0
+    push mod0
+    mov a1l, y0
+    mov a0, a1
+    rst 0x0c00, mod0
+    dint
+    clr a0, always
+    mpysu y0, a1l, a0
+    mac y0, a1h, a0
+    shfi a0, a0, -15
+    clr a1, always
+    add p*, a1
+    shfi a1, a1, +1
+    add a1, a0
+    shfi a0, a0, +8
+    shfi a0, a0, -8
+    eint
+    pop mod0
+    pop y0
+    ret always
+
+// Exact floor(a*b/2^16), truncated to signed 32 bits. No dynamic shifts.
+.global aac_mul_q16
+aac_mul_q16:
+    push y0
+    push mod0
+    mov a1l, y0
+    mov a0, a1
+    rst 0x0c00, mod0
+    dint
+    clr a0, always
+    mpysu y0, a1l, a0
+    mac y0, a1h, a0
+    shfi a0, a0, -16
+    clr a1, always
+    add p*, a1
+    add a1, a0
+    shfi a0, a0, +8
+    shfi a0, a0, -8
+    eint
+    pop mod0
+    pop y0
+    ret always
