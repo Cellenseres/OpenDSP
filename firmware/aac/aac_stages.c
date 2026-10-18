@@ -19,6 +19,8 @@ static u32 noise_seed;
 static u16 dequant_job[5];
 void aac_dequant_span(const u16 *job);
 static s32 tns_state[12];
+static u16 tns_job[6];
+void aac_tns_span(const u16 *job);
 
 static u16 spectrum(u16 ch) { return (u16)(unsigned)d_spec + (ch ? 2048 : 0); }
 static u16 band_offset(u16 ib, u16 sfb)
@@ -221,16 +223,20 @@ void aac_stage_tns(u16 ch)
         addr = spectrum(ch) + (d_tns[tb + T_WINDOW] << 8);
         if (d_tns[tb + T_DIRECTION]) { addr += (end - 1) << 1; step = -2; }
         else addr += start << 1;
-        for (count = end - start; count; count--, addr += step) {
-            s32 v = aac_load32(addr);
+        for (count = end - start; count;) {
+            u16 n = count & 7;
+            if (!n) n = 8;
+            tns_job[0] = addr;
+            tns_job[1] = n;
+            tns_job[2] = (u16)(unsigned)tns_state;
+            tns_job[3] = (u16)(unsigned)(d_tns + tb + T_COEF);
+            tns_job[4] = order;
+            tns_job[5] = (u16)step;
             if (!(count & 7)) aac_yield();
-            for (m = order; m-- > 0;) {
-                s16 coef = (s16)d_tns[tb + T_COEF + m];
-                v = aac_diff_sat(v, aac_mul_shift(tns_state[m], coef, 15));
-                if (m + 1 < order) tns_state[m + 1] = aac_sum_sat(tns_state[m], aac_mul_shift(v, coef, 15));
-            }
-            tns_state[0] = v;
-            aac_store32(addr, v);
+            aac_tns_span(tns_job);
+            count -= n;
+            if (step > 0) addr += n << 1;
+            else addr -= n << 1;
         }
     }
 }
