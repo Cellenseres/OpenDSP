@@ -1,10 +1,10 @@
 # Sound Lab 1.2.0
 
-Install opendsp-soundlab.cia or use the 3DSX/SMDH with the Homebrew Launcher.
-The CIA updates an existing Sound Lab installation.
+Install `opendsp-soundlab.cia` to add or update Sound Lab. For the Homebrew
+Launcher, copy the 3DSX and SMDH files.
 
-Put WAV/AAC files in sdmc:/3ds/opendsp-lab/. AAC uses the DSP by default.
-Press X in the player to switch to ARM11. DSP decoding supports AAC-LC ADTS,
-mono/stereo, 8-48 kHz and one block per frame.
+Put WAV/AAC files in `sdmc:/3ds/opendsp-lab/`. AAC uses DSP by default;
+X switches to ARM11. DSP supports mono/stereo AAC-LC ADTS at 8-48 kHz,
+with one block per frame.
 
-The firmware is built in. See docs/AAC.md for the supported formats.
+The firmware is built in. See [AAC formats](../../docs/AAC.md).
