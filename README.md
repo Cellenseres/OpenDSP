@@ -2,9 +2,9 @@
 
 # OpenDSP
 
-OpenDSP replaces the DSP firmware used by libctru's ndsp on the Nintendo 3DS.
-Link it into your homebrew and users won't need to dump `dspfirm.cdc` or put it
-on their SD card. It was written from scratch and contains no Nintendo firmware code.
+OpenDSP replaces the Nintendo 3DS DSP firmware used by libctru's ndsp.
+Link it into your homebrew so users don't need to dump `dspfirm.cdc`.
+It was written from scratch and contains no Nintendo firmware code.
 
 ## Getting started
 
@@ -35,11 +35,15 @@ Reverb and delay run on the DSP through ndsp's two aux buses. Include
 `<opendsp/effects.h>` to configure them. The [guide](docs/GUIDE.md#reverb-and-delay)
 has an example, and Sound Lab includes Room, Hall, Plate and Cave presets.
 
-## AAC
+## WAV and AAC
 
-AAC-LC decoding uses the DSP by default when it's available. ARM11 remains
-available for standalone decoding and formats outside the DSP's limits.
-Use `<opendsp/aac.h>`; [AAC.md](docs/AAC.md) has the details.
+Use `<opendsp/audio.h>` to stream files with pause, looping and WAV seeking.
+It reads and buffers files in the background. See the [streaming guide](docs/STREAMING.md)
+and [example](examples/streaming).
+
+AAC-LC uses the DSP by default. ARM11 is available for standalone decoding and
+formats outside the DSP's limits. If you only need the decoder, use
+`<opendsp/aac.h>`; [AAC.md](docs/AAC.md) covers its API and format limits.
 
 ## Sound Lab
 
