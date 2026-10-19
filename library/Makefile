@@ -23,6 +23,11 @@ build/%.o: source/%.c $(wildcard include/*.h include/opendsp/*.h source/*.h) ../
 	$(CC) $(CFLAGS) -c $< -o $@
 
 AAC_OBJECTS := build/aac_api.o build/aac_dsp.o $(addprefix build/aac/,decoder.o syntax.o spectrum.o filterbank.o tables.o)
+AUDIO_OBJECTS := $(addprefix build/audio/,input.o codec.o wav.o aac.o output.o engine.o)
+
+build/audio/%.o: source/audio/%.c $(wildcard source/audio/*.h include/opendsp/*.h)
+	@mkdir -p build/audio
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(AAC_OBJECTS): include/opendsp/aac.h $(wildcard source/aac/*.h) ../firmware/aac_protocol.h
 
@@ -34,7 +39,7 @@ build/firmware.o: source/firmware.s $(FIRMWARE) ../firmware/aac_tables.bin
 	@mkdir -p build
 	$(CC) $(ARCH) -x assembler-with-cpp -Wa,-I,$(dir $(FIRMWARE)) -c $< -o $@
 
-lib/libopendsp.a: build/opendsp.o build/embedded.o build/firmware.o build/mailbox.o build/effects.o $(AAC_OBJECTS)
+lib/libopendsp.a: build/opendsp.o build/embedded.o build/firmware.o build/mailbox.o build/effects.o $(AAC_OBJECTS) $(AUDIO_OBJECTS)
 	@mkdir -p lib
 	rm -f $@
 	$(AR) rcs $@ $^

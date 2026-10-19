@@ -5,6 +5,8 @@
 #include "internal.h"
 
 bool opendsp_running;
+void opendsp_audio_before_exit(void) __attribute__((weak));
+void opendsp_audio_after_exit(bool unloaded) __attribute__((weak));
 
 bool opendspCheckImage(const void *image, u32 size)
 {
@@ -32,8 +34,12 @@ Result opendspInitFromMemory(const void *image, u32 size)
 
 void opendspExit(void)
 {
+    if (opendsp_audio_before_exit)
+        opendsp_audio_before_exit();
     ndspExit();
     opendsp_running = false;
     opendsp_aac_release();
     opendsp_effects_release();
+    if (opendsp_audio_after_exit)
+        opendsp_audio_after_exit(!dspIsComponentLoaded());
 }
