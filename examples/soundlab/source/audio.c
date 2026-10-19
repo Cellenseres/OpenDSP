@@ -341,10 +341,9 @@ static LightLock lock;
 
 static float note_hz(int midi) { return 440.f * powf(2.f, (midi - 69) / 12.f); }
 
-// main, plus sends: aux 0 reverb, aux 1 delay
-void audio_set_mix(int ch, float l, float r)
+void audio_build_mix(int ch, float l, float r, float mix[12])
 {
-    float mix[12] = {0};
+    memset(mix, 0, 12 * sizeof(*mix));
     float reverb = S.reverb ? S.reverb_send / 100.f : 0, delay = S.delay ? 0.5f : 0;
     mix[0] = l;
     mix[1] = r;
@@ -354,6 +353,12 @@ void audio_set_mix(int ch, float l, float r)
         mix[8] = l * delay;
         mix[9] = r * delay;
     }
+}
+
+void audio_set_mix(int ch, float l, float r)
+{
+    float mix[12];
+    audio_build_mix(ch, l, r, mix);
     ndspChnSetMix(ch, mix);
 }
 
@@ -701,7 +706,7 @@ bool audio_init(char *error, size_t error_len)
     make_sfx();
     Result rc = opendspInit();
     if (R_FAILED(rc)) {
-        snprintf(error, error_len, "opendspInit failed: 0x%08lX", rc);
+        snprintf(error, error_len, "opendspInit failed: 0x%08lX", (unsigned long)rc);
         return false;
     }
     for (int ch = 0; ch < 24; ch++)
@@ -735,6 +740,7 @@ void audio_exit(void)
     ndspSetCallback(NULL, NULL);
     ndspSetCapture(NULL);
     opendspExit();
+    wav_exit();
     free(capture_buf);
 }
 
