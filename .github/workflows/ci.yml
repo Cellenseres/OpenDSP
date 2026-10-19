@@ -22,6 +22,8 @@ jobs:
         run: make -C library
       - name: Sound Lab (.3dsx)
         run: make -C examples/soundlab
+      - name: Streaming example (.3dsx)
+        run: make -C examples/streaming
 
   firmware:
     runs-on: ubuntu-24.04

@@ -10,6 +10,11 @@ examples/soundlab/*.cia
 examples/soundlab/*.elf
 examples/soundlab/*.smdh
 examples/soundlab/*.map
+examples/streaming/build/
+examples/streaming/*.3dsx
+examples/streaming/*.elf
+examples/streaming/*.smdh
+examples/streaming/*.map
 toolchain/teak-llvm/
 tests/effects/effects_test
 tests/host/
