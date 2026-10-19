@@ -25,8 +25,10 @@ typedef struct {
     Thread thread;
     LightEvent event;
     unsigned group;
+    bool frame_needed;
 } audio_worker;
 static audio_worker workers[2];
+static u32 worker_channels[2];
 static LightLock registry_lock, lifecycle_lock;
 static opendspAudioStream *streams[24];
 static u32 pool, epoch;
@@ -50,13 +52,18 @@ static void cancel(opendspAudioStream *s)
 {
     __atomic_add_fetch(&s->generation, 1, __ATOMIC_RELEASE);
 }
+static void wake_stream(opendspAudioStream *s)
+{
+    LightEvent_Signal(&workers[s->group].event);
+}
 
 void opendspAudioNotifyFrame(void)
 {
-    if (!flag(&events_ready))
+    if (!flag(&events_ready) || !flag(&running))
         return;
-    LightEvent_Signal(&workers[0].event);
-    LightEvent_Signal(&workers[1].event);
+    for (unsigned i = 0; i < 2; ++i)
+        if (flag(&workers[i].frame_needed) && __atomic_load_n(&worker_channels[i], __ATOMIC_ACQUIRE))
+            LightEvent_Signal(&workers[i].event);
 }
 
 static void dsp_event(DSP_HookType type)
@@ -66,13 +73,17 @@ static void dsp_event(DSP_HookType type)
     __atomic_add_fetch(&epoch, 1, __ATOMIC_RELEASE);
     if (type == DSPHOOK_ONWAKEUP)
         set_flag(&sleeping, false);
-    opendspAudioNotifyFrame();
+    if (flag(&events_ready) && flag(&running))
+        for (unsigned i = 0; i < 2; ++i)
+            if (__atomic_load_n(&worker_channels[i], __ATOMIC_ACQUIRE))
+                LightEvent_Signal(&workers[i].event);
 }
 
 static u64 source_position(const opendspAudioStream *s)
 {
     u64 position = s->output.position;
-    if ((s->looping || s->looped) && s->info.duration_known && s->info.total_frames) {
+    if ((s->looping || s->looped) && s->info.duration_known && s->info.total_frames &&
+        position >= s->info.total_frames) {
         position %= s->info.total_frames;
         if (s->state == OPENDSP_AUDIO_FINISHED && !position && s->output.position)
             position = s->info.total_frames;
@@ -196,12 +207,12 @@ static bool step(opendspAudioStream *s)
     if (!play || o->retiring)
         return false;
     opendsp_audio_output_reap(o);
-    ndspChnSetPaused(o->channel, paused || !s->started);
+    opendsp_audio_output_pause(o, paused || !s->started);
     if (paused)
         return false;
     if (s->started && !s->eof && !o->queued) {
         s->started = false;
-        ndspChnSetPaused(o->channel, true);
+        opendsp_audio_output_pause(o, true);
         LightLock_Lock(&s->lock);
         ++s->stats.underruns;
         ++s->stats.rebuffers;
@@ -253,12 +264,12 @@ static bool step(opendspAudioStream *s)
             s->position = source_position(s);
             s->play = false;
             s->started = false;
-            ndspChnSetPaused(o->channel, true);
+            opendsp_audio_output_pause(o, true);
         } else {
             if (!s->started && (o->queued == o->count || (s->eof && o->queued)))
                 s->started = true;
             if (s->started) {
-                ndspChnSetPaused(o->channel, false);
+                opendsp_audio_output_pause(o, false);
                 s->state = s->eof ? OPENDSP_AUDIO_DRAINING : OPENDSP_AUDIO_PLAYING;
             }
         }
@@ -273,8 +284,12 @@ static void worker_main(void *arg)
     unsigned first = 0;
     while (flag(&running)) {
         bool active = false, progress = false;
-        for (unsigned n = 0; n < 24 && flag(&running); ++n) {
+        u32 candidates = __atomic_load_n(&worker_channels[w->group], __ATOMIC_ACQUIRE);
+        for (unsigned n = 0; candidates && n < 24 && flag(&running); ++n) {
             unsigned i = (first + n) % 24;
+            if (!(candidates & (1u << i)))
+                continue;
+            candidates &= ~(1u << i);
             LightLock_Lock(&registry_lock);
             opendspAudioStream *s = streams[i];
             if (s && !s->closing && s->group == w->group)
@@ -285,8 +300,8 @@ static void worker_main(void *arg)
             if (!s)
                 continue;
             LightLock_Lock(&s->lock);
-            bool needs_work = s->reset || (s->play && !s->paused) || s->control_dirty || s->mix_dirty ||
-                              s->rate_dirty || s->epoch != current_epoch();
+            bool needs_work = !s->closing && (s->reset || (s->play && !s->paused) || s->control_dirty ||
+                                              s->mix_dirty || s->rate_dirty || s->epoch != current_epoch());
             LightLock_Unlock(&s->lock);
             if (needs_work) {
                 active = true;
@@ -299,6 +314,7 @@ static void worker_main(void *arg)
             LightLock_Unlock(&registry_lock);
         }
         first = (first + 1) % 24;
+        set_flag(&w->frame_needed, active);
         if (!flag(&running))
             break;
         if (!progress) {
@@ -313,7 +329,9 @@ static void worker_main(void *arg)
 static void join_workers(void)
 {
     set_flag(&running, false);
-    opendspAudioNotifyFrame();
+    if (flag(&events_ready))
+        for (unsigned i = 0; i < 2; ++i)
+            LightEvent_Signal(&workers[i].event);
     for (unsigned i = 0; i < 2; ++i)
         if (workers[i].thread) {
             threadJoin(workers[i].thread, U64_MAX);
@@ -356,6 +374,7 @@ Result opendspAudioInit(u32 channel_mask)
     if (priority > 0x18)
         --priority;
     for (unsigned i = 0; i < 2; ++i) {
+        set_flag(&workers[i].frame_needed, false);
         workers[i].thread = threadCreate(worker_main, &workers[i], 16 * 1024, priority, -2, false);
         if (!workers[i].thread) {
             join_workers();
@@ -454,9 +473,10 @@ Result opendspAudioOpen(opendspAudioStream **out, const char *path, const opends
     ndspChnGetMix(channel, s->mix);
     LightLock_Lock(&registry_lock);
     streams[channel] = s;
+    __atomic_fetch_or(&worker_channels[s->group], 1u << channel, __ATOMIC_RELEASE);
     LightLock_Unlock(&registry_lock);
     *out = s;
-    opendspAudioNotifyFrame();
+    wake_stream(s);
     goto done;
 fail:
     opendsp_audio_codec_close(&s->codec);
@@ -466,7 +486,9 @@ done:
     return r;
 }
 
-static Result command(opendspAudioStream *s, unsigned cmd, u64 frame)
+typedef enum { AUDIO_PLAY, AUDIO_PAUSE, AUDIO_RESUME, AUDIO_STOP, AUDIO_SEEK } audio_command;
+
+static Result command(opendspAudioStream *s, audio_command cmd, u64 frame)
 {
     if (!s)
         return OPENDSP_AUDIO_ERR_ARGUMENT;
@@ -475,13 +497,13 @@ static Result command(opendspAudioStream *s, unsigned cmd, u64 frame)
         LightLock_Unlock(&s->lock);
         return OPENDSP_AUDIO_ERR_STATE;
     }
-    if (cmd == 4 && ((s->info.format == OPENDSP_AUDIO_AAC && frame) ||
-                     (s->info.duration_known && frame > s->info.total_frames))) {
+    if (cmd == AUDIO_SEEK && ((s->info.format == OPENDSP_AUDIO_AAC && frame) ||
+                              (s->info.duration_known && frame > s->info.total_frames))) {
         LightLock_Unlock(&s->lock);
         return s->info.format == OPENDSP_AUDIO_AAC ? OPENDSP_AUDIO_ERR_UNSUPPORTED
                                                    : OPENDSP_AUDIO_ERR_ARGUMENT;
     }
-    if (cmd == 0) {
+    if (cmd == AUDIO_PLAY) {
         if (!s->play) {
             if (s->state == OPENDSP_AUDIO_FINISHED || s->state == OPENDSP_AUDIO_ERROR)
                 s->target = 0;
@@ -492,21 +514,21 @@ static Result command(opendspAudioStream *s, unsigned cmd, u64 frame)
             s->command_epoch = current_epoch();
             s->state = OPENDSP_AUDIO_BUFFERING;
         }
-    } else if (cmd == 1) {
+    } else if (cmd == AUDIO_PAUSE) {
         if (s->play) {
             s->paused = true;
             s->control_dirty = true;
             s->state = OPENDSP_AUDIO_PAUSED;
         }
-    } else if (cmd == 2) {
+    } else if (cmd == AUDIO_RESUME) {
         if (s->play) {
             s->paused = false;
             s->control_dirty = true;
             s->state = OPENDSP_AUDIO_BUFFERING;
         }
     } else {
-        s->target = cmd == 3 ? 0 : frame;
-        if (cmd == 3) {
+        s->target = cmd == AUDIO_STOP ? 0 : frame;
+        if (cmd == AUDIO_STOP) {
             s->play = false;
             s->paused = false;
         }
@@ -516,28 +538,28 @@ static Result command(opendspAudioStream *s, unsigned cmd, u64 frame)
         s->state = OPENDSP_AUDIO_STOPPING;
     }
     LightLock_Unlock(&s->lock);
-    opendspAudioNotifyFrame();
+    wake_stream(s);
     return 0;
 }
 Result opendspAudioPlay(opendspAudioStream *s)
 {
-    return command(s, 0, 0);
+    return command(s, AUDIO_PLAY, 0);
 }
 Result opendspAudioPause(opendspAudioStream *s)
 {
-    return command(s, 1, 0);
+    return command(s, AUDIO_PAUSE, 0);
 }
 Result opendspAudioResume(opendspAudioStream *s)
 {
-    return command(s, 2, 0);
+    return command(s, AUDIO_RESUME, 0);
 }
 Result opendspAudioStop(opendspAudioStream *s)
 {
-    return command(s, 3, 0);
+    return command(s, AUDIO_STOP, 0);
 }
 Result opendspAudioSeek(opendspAudioStream *s, u64 frame)
 {
-    return command(s, 4, frame);
+    return command(s, AUDIO_SEEK, frame);
 }
 
 Result opendspAudioClose(opendspAudioStream **handle)
@@ -555,9 +577,10 @@ Result opendspAudioClose(opendspAudioStream **handle)
     s->play = false;
     s->state = OPENDSP_AUDIO_STOPPING;
     cancel(s);
+    __atomic_fetch_and(&worker_channels[s->group], ~(1u << s->output.channel), __ATOMIC_RELEASE);
     LightLock_Unlock(&s->lock);
     LightLock_Unlock(&registry_lock);
-    opendspAudioNotifyFrame();
+    wake_stream(s);
     u64 start = svcGetSystemTick();
     for (;;) {
         LightLock_Lock(&registry_lock);
@@ -596,7 +619,7 @@ Result opendspAudioSetLoop(opendspAudioStream *s, bool loop)
     }
     s->looping = loop;
     LightLock_Unlock(&s->lock);
-    opendspAudioNotifyFrame();
+    wake_stream(s);
     return 0;
 }
 Result opendspAudioSetVolume(opendspAudioStream *s, float volume)
@@ -611,7 +634,7 @@ Result opendspAudioSetVolume(opendspAudioStream *s, float volume)
     s->volume = volume;
     s->mix_dirty = true;
     LightLock_Unlock(&s->lock);
-    opendspAudioNotifyFrame();
+    wake_stream(s);
     return 0;
 }
 Result opendspAudioSetMix(opendspAudioStream *s, const float mix[12])
@@ -629,7 +652,7 @@ Result opendspAudioSetMix(opendspAudioStream *s, const float mix[12])
     memcpy(s->mix, mix, sizeof(s->mix));
     s->mix_dirty = true;
     LightLock_Unlock(&s->lock);
-    opendspAudioNotifyFrame();
+    wake_stream(s);
     return 0;
 }
 Result opendspAudioSetRate(opendspAudioStream *s, float rate)
@@ -644,7 +667,7 @@ Result opendspAudioSetRate(opendspAudioStream *s, float rate)
     s->rate = rate;
     s->rate_dirty = true;
     LightLock_Unlock(&s->lock);
-    opendspAudioNotifyFrame();
+    wake_stream(s);
     return 0;
 }
 
