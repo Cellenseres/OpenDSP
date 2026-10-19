@@ -3,12 +3,17 @@
 #include <string.h>
 #include "codec.h"
 
+#define AAC_INPUT_BYTES 8192
+#define AAC_PCM_FRAMES 4096
+#define AAC_BLOCK_FRAMES 1024
+#define AAC_SYNC_ATTEMPTS 32
+
 typedef struct {
     opendspAacDecoder *decoder;
-    u8 input[8192];
-    s16 pcm[4096 * 2];
-    u32 length, offset, frames, pcm_offset;
+    u8 input[AAC_INPUT_BYTES];
+    u32 length, offset, frames, pcm_offset, pcm_capacity;
     bool eof;
+    s16 pcm[];
 } aac_data;
 
 static Result aac_seek(audio_codec *c, u64 frame)
@@ -26,28 +31,37 @@ static Result aac_seek(audio_codec *c, u64 frame)
     return 0;
 }
 
-static Result aac_frame(audio_codec *c, bool probe)
+static Result aac_refill(audio_codec *c)
 {
     aac_data *a = c->data;
-    // Each call has a fixed resynchronisation budget, even for a file of junk.
-    for (unsigned attempt = 0; attempt < 32; ++attempt) {
+    u32 left = a->length - a->offset;
+    if (left == sizeof(a->input))
+        return OPENDSP_AUDIO_ERR_FORMAT;
+    if (left && a->offset)
+        memmove(a->input, a->input + a->offset, left);
+    a->length = left;
+    a->offset = 0;
+    size_t got;
+    Result r = opendsp_audio_input_read(&c->in, a->input + left, sizeof(a->input) - left, &got);
+    if (R_FAILED(r))
+        return r;
+    a->length += got;
+    a->eof = feof(c->in.file);
+    return !got && !a->eof ? OPENDSP_AUDIO_ERR_IO : 0;
+}
+
+static Result aac_frame(audio_codec *c, bool probe, s16 *pcm, u32 capacity)
+{
+    aac_data *a = c->data;
+    for (unsigned attempt = 0; attempt < AAC_SYNC_ATTEMPTS; ++attempt) {
         if (opendsp_audio_input_cancelled(&c->in))
             return OPENDSP_AUDIO_ERR_BUSY;
-        if (a->offset) {
-            memmove(a->input, a->input + a->offset, a->length - a->offset);
-            a->length -= a->offset;
-            a->offset = 0;
-        }
-        if (!a->eof && a->length < sizeof(a->input)) {
-            size_t got;
-            Result r =
-                opendsp_audio_input_read(&c->in, a->input + a->length, sizeof(a->input) - a->length, &got);
+        if (a->offset == a->length && !a->eof) {
+            Result r = aac_refill(c);
             if (R_FAILED(r))
                 return r;
-            a->length += got;
-            a->eof = feof(c->in.file);
         }
-        if (!a->length && a->eof) {
+        if (a->offset == a->length && a->eof) {
             if (!probe) {
                 c->info.total_frames = c->position;
                 c->info.duration_known = true;
@@ -58,13 +72,20 @@ static Result aac_frame(audio_codec *c, bool probe)
         size_t used = 0, frames = 0;
         opendspAacInfo info = {0};
         u64 start = svcGetSystemTick();
-        Result r = opendspAacDecode(a->decoder, a->input, a->length, &used, a->pcm, 4096, &frames, &info);
+        Result r = opendspAacDecode(a->decoder, a->input + a->offset, a->length - a->offset, &used, pcm,
+                                    capacity, &frames, &info);
         c->stats.decode_ticks += svcGetSystemTick() - start;
-        a->offset = used;
+        a->offset += used;
         if (r == OPENDSP_AAC_ERR_BUSY)
             return OPENDSP_AUDIO_ERR_BUSY;
-        if (r == OPENDSP_AAC_ERR_NEED_MORE_DATA)
-            return a->eof ? OPENDSP_AUDIO_ERR_TRUNCATED : OPENDSP_AUDIO_ERR_FORMAT;
+        if (r == OPENDSP_AAC_ERR_NEED_MORE_DATA) {
+            if (a->eof)
+                return OPENDSP_AUDIO_ERR_TRUNCATED;
+            r = aac_refill(c);
+            if (R_FAILED(r))
+                return r;
+            continue;
+        }
         if (r == OPENDSP_AAC_INFO_SKIPPED) {
             if (!used)
                 return OPENDSP_AUDIO_ERR_FORMAT;
@@ -73,7 +94,7 @@ static Result aac_frame(audio_codec *c, bool probe)
         }
         if (R_FAILED(r))
             return r;
-        if (!frames || !used || frames > 4096)
+        if (!frames || !used || frames > capacity)
             return OPENDSP_AUDIO_ERR_FORMAT;
         if (info.flags & OPENDSP_AAC_INFO_DISCONTINUITY)
             return OPENDSP_AUDIO_ERR_CONTEXT;
@@ -95,9 +116,21 @@ static Result aac_read(audio_codec *c, void *out, u32 capacity, u32 *frames)
     aac_data *a = c->data;
     *frames = 0;
     if (a->pcm_offset == a->frames) {
-        Result r = aac_frame(c, false);
+        // A changed ADTS header can write stereo before the format check.
+        bool direct = c->info.channels == 2 && capacity >= AAC_BLOCK_FRAMES && capacity >= a->frames;
+        Result r = aac_frame(c, false, direct ? out : a->pcm, direct ? capacity : a->pcm_capacity);
+        if (direct && r == OPENDSP_AAC_ERR_OUTPUT_TOO_SMALL) {
+            direct = false;
+            r = aac_frame(c, false, a->pcm, a->pcm_capacity);
+        }
         if (R_FAILED(r))
             return r;
+        if (direct) {
+            a->pcm_offset = a->frames;
+            c->position += a->frames;
+            *frames = a->frames;
+            return 0;
+        }
     }
     u32 count = a->frames - a->pcm_offset;
     if (count > capacity)
@@ -120,38 +153,54 @@ static void aac_close(audio_codec *c)
 }
 static const audio_codec_ops aac_ops = {aac_read, aac_seek, aac_close};
 
+static Result aac_allocate(audio_codec *c, u32 backend)
+{
+    opendspAacConfig config = {sizeof(config), backend, 0};
+    opendspAacDecoder *decoder = NULL;
+    Result r = opendspAacOpen(&decoder, &config);
+    if (R_FAILED(r))
+        return r;
+    backend = opendspAacGetBackend(decoder);
+    u32 capacity = backend == OPENDSP_AAC_BACKEND_DSP ? AAC_BLOCK_FRAMES : AAC_PCM_FRAMES;
+    size_t bytes = sizeof(aac_data) + capacity * 2 * sizeof(s16);
+    aac_data *a = calloc(1, bytes);
+    if (!a) {
+        opendspAacClose(decoder);
+        return OPENDSP_AUDIO_ERR_MEMORY;
+    }
+    a->decoder = decoder;
+    a->pcm_capacity = capacity;
+    c->data = a;
+    c->backend = backend;
+    c->memory = bytes + (backend == OPENDSP_AAC_BACKEND_DSP ? 24832 : 32768);
+    return 0;
+}
+
 Result opendsp_audio_aac_open(audio_codec *c, u32 backend)
 {
-    aac_data *a = calloc(1, sizeof(*a));
-    if (!a)
-        return OPENDSP_AUDIO_ERR_MEMORY;
-    c->data = a;
     c->ops = &aac_ops;
     c->info.format = OPENDSP_AUDIO_AAC;
     c->info.bits = 16;
-    opendspAacConfig config = {sizeof(config), backend, 0};
-    Result r = opendspAacOpen(&a->decoder, &config);
+    Result r = aac_allocate(c, backend);
     if (R_FAILED(r))
         return r;
-    r = aac_frame(c, true);
+    aac_data *a = c->data;
+    r = aac_frame(c, true, a->pcm, a->pcm_capacity);
     if (r == OPENDSP_AAC_ERR_UNSUPPORTED && backend == OPENDSP_AAC_BACKEND_AUTO &&
-        opendspAacGetBackend(a->decoder) == OPENDSP_AAC_BACKEND_DSP) {
-        opendspAacClose(a->decoder);
-        a->decoder = NULL;
-        config.backend = OPENDSP_AAC_BACKEND_ARM11;
-        r = opendspAacOpen(&a->decoder, &config);
+        c->backend == OPENDSP_AAC_BACKEND_DSP) {
+        aac_close(c);
+        r = aac_allocate(c, OPENDSP_AAC_BACKEND_ARM11);
         if (R_FAILED(r))
             return r;
+        a = c->data;
         r = aac_seek(c, 0);
         if (R_FAILED(r))
             return r;
-        r = aac_frame(c, true);
+        r = aac_frame(c, true, a->pcm, a->pcm_capacity);
     }
     if (R_FAILED(r))
         return r;
     if (!a->frames || c->info.channels < 1 || c->info.channels > 2)
         return OPENDSP_AUDIO_ERR_FORMAT;
-    c->backend = opendspAacGetBackend(a->decoder);
-    c->memory = sizeof(*a) + (c->backend == OPENDSP_AAC_BACKEND_DSP ? 24832 : 32768);
     return aac_seek(c, 0);
 }
