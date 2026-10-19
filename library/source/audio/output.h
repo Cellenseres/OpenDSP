@@ -15,13 +15,14 @@ typedef struct {
     int channel;
     u32 queued, queued_frames;
     u64 submitted, completed, position;
-    bool touched, retiring;
+    bool touched, retiring, pause_known, paused;
     u32 fence_frame, fence_epoch, fence_steps;
 } audio_output;
 
 Result opendsp_audio_output_open(audio_output *o, int channel, u32 count, u32 frames,
                                  const opendspAudioInfo *info);
 void opendsp_audio_output_configure(audio_output *o, const opendspAudioInfo *info, float rate);
+void opendsp_audio_output_pause(audio_output *o, bool paused);
 void opendsp_audio_output_reap(audio_output *o);
 int opendsp_audio_output_free(const audio_output *o);
 void *opendsp_audio_output_data(audio_output *o, int buffer);
