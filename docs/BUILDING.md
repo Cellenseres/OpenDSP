@@ -23,9 +23,8 @@ toolchain/build_teak_llvm.sh
 make -C firmware
 ```
 
-The compiler build takes about half an hour. If it's already installed elsewhere,
-pass `TEAK_LLVM=/path/to/build` to make. Keep the resulting `opendsp.cdc` and
-`aac_tables.bin` together, then rebuild the library and app.
+For an existing compiler build, pass `TEAK_LLVM=/path/to/build` to make. Keep
+`opendsp.cdc` and `aac_tables.bin` together, then rebuild the library and app.
 
 To regenerate the DSP table source:
 
@@ -43,5 +42,4 @@ The compiler is limited, and hardware is stricter than the emulator:
 - Large stack frames, local arrays and functions with more than four arguments
   can break code generation. Keep DSP C functions small.
 
-The patches handle several of these cases, but hand-written assembly still
-needs care. Check changes on hardware as well as in the emulator.
+Check assembly changes on hardware as well as in the emulator.

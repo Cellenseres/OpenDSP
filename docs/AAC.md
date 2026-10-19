@@ -1,8 +1,7 @@
 # AAC decoding
 
-OpenDSP decodes AAC-LC ADTS files (`.aac`) into interleaved PCM16 for ndsp.
-It uses the DSP when available and falls back to ARM11 if it can't open a DSP
-decoder. You can also choose either backend yourself.
+For WAV/AAC playback, use the [streaming API](STREAMING.md). This page covers
+the decoder API, which returns interleaved PCM16 for you to queue with ndsp.
 
 ```c
 #include <opendsp/aac.h>
@@ -11,49 +10,49 @@ opendspAacDecoder *decoder = NULL;
 Result result = opendspAacOpen(&decoder, NULL);
 ```
 
-Once opened, call `opendspAacDecode()` from your streaming thread and queue the
-PCM with ndsp. Close the decoder with `opendspAacClose()` before shutting down
-OpenDSP. Sound Lab's [player](../examples/soundlab/source/wav.c) is a working example.
-
-## Choosing a backend
+## Backends
 
 | Backend | Sample rates | Blocks per ADTS frame |
 | --- | --- | --- |
 | DSP | 8-48 kHz | 1 |
 | ARM11 | 8-96 kHz | 1-4 |
 
-Both handle mono and stereo. DSP input is limited to 2048 bytes per frame and
-needs a running OpenDSP instance. ARM11 works without ndsp or the DSP.
+Both support mono and stereo. DSP needs a running OpenDSP instance and accepts
+at most 2048 encoded bytes per frame, including headers. ARM11 works without ndsp.
 
-`NULL` config and `OPENDSP_AAC_BACKEND_AUTO` try DSP first when the decoder is
-opened. If it is unavailable or already in use, they select ARM11. The backend
-then stays fixed until close; check it with `opendspAacGetBackend()`.
-
-Choose ARM11 explicitly for higher rates or multi-block streams:
+`NULL` config and `OPENDSP_AAC_BACKEND_AUTO` try DSP at Open, then ARM11 if the
+DSP decoder is unavailable or occupied. The backend stays fixed; check it with
+`opendspAacGetBackend()`.
+Choose ARM11 for higher rates or multi-block streams:
 
 ```c
 opendspAacConfig config = {sizeof(config), OPENDSP_AAC_BACKEND_ARM11, 0};
 Result result = opendspAacOpen(&decoder, &config);
 ```
 
-Use `OPENDSP_AAC_BACKEND_DSP` to require DSP decoding. No opt-in flag is needed.
-[AAC_DSP.md](AAC_DSP.md) covers buffering and DSP-specific behaviour.
+Use `OPENDSP_AAC_BACKEND_DSP` to require DSP. See [AAC_DSP.md](AAC_DSP.md) for
+scheduling and context handling.
 
 ## Decoding
 
-Each call handles one ADTS frame. Leave room for 1024 PCM frames per raw data
-block, with two samples per frame for stereo. Advance your input by
-`bytes_consumed` and use `frames_written` for the output length.
+For playback, decode on a worker thread. Each `opendspAacDecode()` call handles
+one ADTS frame.
+Reserve 1024 PCM frames per raw data block, with two samples per frame for stereo.
+Advance input by `bytes_consumed` and queue `frames_written` frames.
 
 `ERR_NEED_MORE_DATA` and `ERR_OUTPUT_TOO_SMALL` consume nothing. Skipped junk,
-corrupt frames and unsupported frames report how much input was consumed.
-Other errors with no progress should be handled rather than retried in a tight loop.
+corrupt frames and unsupported frames report consumed bytes. Handle errors
+without progress instead of retrying in a tight loop.
 
-`info` reports the rate, channels and format changes. Reset the decoder after
-seeking. Use one decoder per stream and serialize calls, including reset and close.
+`info` reports rate, channels and format changes. Reset after seeking. Serialize
+calls to each decoder, including reset and close. Call `opendspAacClose()` before
+shutting down OpenDSP.
 
-All spectral codebooks, TNS, PNS, M/S, intensity stereo, window sequences and
-sine/KBD windows are supported. HE-AAC plays its LC core and sets
-`OPENDSP_AAC_INFO_SBR_IGNORED`; SBR and PS aren't decoded. Other exclusions
-include Main/SSR/LTP, more than two channels, channel configuration 0, CCE/LFE
-and 7350 Hz. ADTS CRC words are skipped, not checked.
+## Formats
+
+AAC-LC ADTS supports all spectral codebooks, TNS, PNS, M/S, intensity stereo,
+window sequences and sine/KBD windows. HE-AAC plays its LC core and sets
+`OPENDSP_AAC_INFO_SBR_IGNORED`; SBR and PS aren't decoded.
+
+Main/SSR/LTP, more than two channels, channel configuration 0, CCE/LFE and
+7350 Hz are unsupported. ADTS CRC words are skipped, not checked.
