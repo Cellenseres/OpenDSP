@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: BSD-2-Clause
-#include <stdlib.h>
 #include <string.h>
 #include "output.h"
 
@@ -22,14 +21,22 @@ void opendsp_audio_output_configure(audio_output *o, const opendspAudioInfo *inf
 {
     u16 format = info->bits == 16 ? NDSP_FORMAT_MONO_PCM16 : NDSP_FORMAT_MONO_PCM8;
     if (info->channels == 2) format = info->bits == 16 ? NDSP_FORMAT_STEREO_PCM16 : NDSP_FORMAT_STEREO_PCM8;
-    ndspChnSetPaused(o->channel, true);
+    opendsp_audio_output_pause(o, true);
     ndspChnSetFormat(o->channel, format);
     ndspChnSetRate(o->channel, rate);
 }
 
+void opendsp_audio_output_pause(audio_output *o, bool paused)
+{
+    if (o->pause_known && o->paused == paused) return;
+    ndspChnSetPaused(o->channel, paused);
+    o->paused = paused;
+    o->pause_known = true;
+}
+
 void opendsp_audio_output_reap(audio_output *o)
 {
-    if (o->retiring) return;
+    if (o->retiring || !o->queued) return;
     u16 seq = ndspChnGetWaveBufSeq(o->channel);
     u32 sample = ndspChnGetSamplePos(o->channel);
     for (u32 i = 0; i < o->count; ++i) {
@@ -76,7 +83,7 @@ void opendsp_audio_output_queue(audio_output *o, int buffer, u32 frames)
 void opendsp_audio_output_retire(audio_output *o, u32 epoch)
 {
     if (o->retiring || !o->touched) return;
-    ndspChnSetPaused(o->channel, true);
+    opendsp_audio_output_pause(o, true);
     ndspChnWaveBufClear(o->channel);
     o->retiring = true;
     o->fence_frame = ndspGetFrameCount();
