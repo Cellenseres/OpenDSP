@@ -44,6 +44,7 @@ bool audio_init(char *error, size_t error_len);
 void audio_exit(void);
 void audio_apply_settings(void);
 void audio_apply_effects(void);
+void audio_build_mix(int ch, float l, float r, float mix[12]);
 void audio_set_mix(int ch, float l, float r);
 const char *audio_reverb_name(int preset);
 int audio_reverb_count(void);
