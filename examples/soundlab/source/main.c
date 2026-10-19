@@ -148,11 +148,10 @@ static void draw_wav(void)
         item(7 + r, cursor[page] == 3 + i, wav_name(i), "");
     }
     if (wav_playing()) {
-        char bar[31];
-        int n = (int)(wav_progress() * 30);
-        for (int k = 0; k < 30; k++)
-            bar[k] = k < n ? '#' : '.';
-        bar[30] = 0;
+        char progress[8];
+        float fraction = wav_progress();
+        if (fraction < 0) snprintf(progress, sizeof(progress), "--");
+        else snprintf(progress, sizeof(progress), "%d%%", (int)(fraction * 100));
         float load = wav_decode_load();
         if (load >= 0)
             line(21, "  " C_DIM "CPU decode (est.): %.1f%%", load * 100);
@@ -161,7 +160,11 @@ static void draw_wav(void)
         else
             line(21, "  " C_DIM "CPU: PCM streaming (unmeasured)");
         line(23, "  " C_OK "%s", wav_info());
-        line(24, "  " C_VAL "%s", bar);
+        opendspAudioStats stream_stats = {.struct_size = sizeof(stream_stats)};
+        if (wav_stats(&stream_stats))
+            line(24, "  %4s  Q %lu  underruns %lu", progress, (unsigned long)stream_stats.queued_frames,
+                (unsigned long)stream_stats.underruns);
+        else line(24, "  " C_VAL "%s", progress);
     } else {
         line(21, "  %.36s", wav_error());
         line(23, "");

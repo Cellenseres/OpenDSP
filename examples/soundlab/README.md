@@ -1,12 +1,12 @@
 # Sound Lab
 
-A small OpenDSP demo with music, a touch keyboard, sound effects, filters,
-reverb and delay. It also plays WAV and AAC files from `sdmc:/3ds/opendsp-lab/`.
+An OpenDSP demo with music, a touch keyboard, sound effects, filters, reverb
+and delay. Put WAV/AAC files in `sdmc:/3ds/opendsp-lab/`; the player streams them.
 
-AAC uses the DSP by default. Press X in the player to switch to ARM11.
-The player shows the active backend and total DSP load.
+AAC uses DSP by default. X switches to ARM11. The player shows the backend,
+DSP load, queued frames and underruns. AAC duration appears after a full pass.
 SELECT stops all sounds; START quits.
 
-Build from this folder with `make` for a 3DSX or `make cia` for an installable CIA.
-The CIA build needs bannertool and makerom; see [BUILDING.md](../../docs/BUILDING.md).
-[Ready-made builds](../../dist/soundlab) are also included.
+Run `make` for a 3DSX or `make cia` for a CIA. The CIA build needs bannertool and
+makerom; see [BUILDING.md](../../docs/BUILDING.md).
+[Release builds](../../dist/soundlab) are also included.
