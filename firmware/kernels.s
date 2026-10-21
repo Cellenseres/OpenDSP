@@ -769,6 +769,26 @@ soft_clip_positive:
     lim     a0, a0
     ret     always
 
+// OR all words of one strided 160-sample mixer channel. No products or IRQ
+// mask; an entirely zero channel cannot excite a zero Delay line/state.
+.global delay_has_input
+delay_has_input:
+    push    r0
+    push    r3
+    mov     a0l, r0
+    mov     0x9f, r3
+    clr     a0, always
+    bkrep   r3, .Ldl_input_end
+    or      [r0++], a0
+    or      [r0++], a0
+    modr    [r0++]
+    modr    [r0++]
+.Ldl_input_end:
+    and     0xffff, a0
+    pop     r3
+    pop     r0
+    ret     always
+
 // void delay_run(const u16 *job): bus (s32, stride 2), line (s16), coefs b a g, y state; 40 samples
 // y = sat16((b y + a line) >> 7), line = sat16(in - (g y >> 7)), bus = y. Q7.
 .global delay_run
@@ -777,6 +797,8 @@ delay_run:
     push    r1
     push    r2
     push    r3
+    push    r4
+    push    r5
     push    y0
     mov     a0l, r3
     mov     [r3++], r0              // bus channel
@@ -784,6 +806,9 @@ delay_run:
     mov     [r3++], r2              // coefs
     mov     [r3], r3                // y state
     mov     [r3], b1h
+    mov     [r2++], r4              // b, invariant for all 40 samples
+    mov     [r2++], r5              // a
+    mov     [r2], r2                // g
     mov     0x27, a1                // 40 samples per call
     dint
     bkrep   a1l, .Ldl_end
@@ -791,19 +816,17 @@ delay_run:
     addl    [r0--], a0
     shfi    a0, a0, +16
     lim     a0, a0
-    mov     [r2++], y0              // b
+    mov     r4, y0                 // b
     mpy     y0, b1h, a1
     clr     a1, always
     add     p*, a1
-    mov     [r2++], y0              // a
+    mov     r5, y0                 // a
     mpy     y0, [r1], a1
     add     p*, a1
     shfi    a1, a1, +9              // y = sat16(sum >> 7)
     lim     a1, a1
     mov     a1, b1
-    mov     [r2], y0                // g
-    modr    [r2--]
-    modr    [r2--]
+    mov     r2, y0                 // g
     mpy     y0, b1h, a1
     clr     a1, always
     add     p*, a1
@@ -822,6 +845,8 @@ delay_run:
     eint
     mov     b1h, [r3]
     pop     y0
+    pop     r5
+    pop     r4
     pop     r3
     pop     r2
     pop     r1
