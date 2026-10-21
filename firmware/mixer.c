@@ -52,7 +52,8 @@ static void ramp_steps(s16 *g, s16 from, s16 to)
 // feedback delay line, Q7 coefficients
 typedef struct {
     u16 enabled, frames, position, channels;
-    s16 g, a, b, pad;
+    s16 g, a, b;
+    u16 active;
     u32 address;
     s16 last[4];
 } delay_t;
@@ -152,6 +153,7 @@ u16 mixer_set_delay(u16 b, const delay_params_t *p)
         }
         e->address = address;
         e->position = 0;
+        e->active = 0;
         e->last[0] = e->last[1] = e->last[2] = e->last[3] = 0;
     }
     e->enabled = 1;
@@ -273,18 +275,35 @@ void mixer_add_source(const s16 *src, s16 gain[NUM_BUSES][2], s16 previous[NUM_B
 static u16 delay_job[4];
 static s16 delay_coefs[3];
 void delay_run(const u16 *job);
+u16 delay_has_input(const s32 *bus);
 
 static void run_delay(delay_t *e, s32 **quad)
 {
-    u16 ch, n;
+    u16 ch, n, words = 0, mask = 1;
     u32 address = e->address + times1280(e->position);
-    dma_read(address, 4 * F, (u16)(unsigned)delay_buf);
+    /* Zero lines stay silent until excited. Keep active bits until reset
+     * so routing changes retain feedback tails. */
+    for (ch = 0; ch < e->channels; ch++) {
+        if (quad[ch]) {
+            if (!(e->active & mask)) {
+                output_poll();
+                if (delay_has_input(quad[ch]))
+                    e->active |= mask;
+            }
+            if (e->active & mask)
+                words = (ch + 1) * F;
+        }
+        mask <<= 1;
+    }
+    if (words)
+        dma_read(address, words, (u16)(unsigned)delay_buf);
     delay_coefs[0] = e->b;
     delay_coefs[1] = e->a;
     delay_coefs[2] = e->g;
     delay_job[2] = (u16)(unsigned)delay_coefs;
-    for (ch = 0; ch < e->channels; ch++) {
-        if (!quad[ch])
+    mask = 1;
+    for (ch = 0; ch < e->channels; ch++, mask <<= 1) {
+        if (!quad[ch] || !(e->active & mask))
             continue;
         delay_job[3] = (u16)(unsigned)&e->last[ch];
         for (n = 0; n < F; n += 40) {
@@ -294,7 +313,8 @@ static void run_delay(delay_t *e, s32 **quad)
             delay_run(delay_job);
         }
     }
-    dma_write((u16)(unsigned)delay_buf, 4 * F, address);
+    if (words)
+        dma_write((u16)(unsigned)delay_buf, words, address);
     if (++e->position >= e->frames)
         e->position = 0;
 }
