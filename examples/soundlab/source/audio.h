@@ -50,7 +50,6 @@ const char *audio_reverb_name(int preset);
 int audio_reverb_count(void);
 float audio_reverb_default_decay(int preset);
 bool audio_effects_available(void);
-u16 audio_firmware_version(void);
 const char *audio_filter_name(int f);
 int audio_filter_count(void);
 const char *audio_wave_name(int w);
