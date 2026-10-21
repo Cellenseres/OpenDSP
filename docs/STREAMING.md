@@ -1,6 +1,6 @@
 # Streaming audio
 
-`<opendsp/audio.h>` plays WAV and AAC from SD or RomFS. It reads files in the
+`<opendsp/audio.h>` plays WAV, AAC and MP3 from SD or RomFS. It reads files in the
 background, using a fixed amount of memory.
 
 ## Setup
@@ -34,11 +34,15 @@ WAVE_FORMAT_EXTENSIBLE and MP4/M4A are unsupported. Detection uses file contents
 See [AAC.md](AAC.md) for AAC-LC ADTS limits. HE-AAC plays its LC core;
 `opendspAudioInfo.aac_flags` reports `OPENDSP_AAC_INFO_SBR_IGNORED`.
 
-AUTO prefers DSP, falling back to ARM11 at Open if the decoder is occupied or
+AAC AUTO prefers DSP, falling back to ARM11 at Open if the decoder is occupied or
 the first frame exceeds its limits. Explicit DSP returns an error instead.
 GetBackend reports the choice, which stays fixed until Close. DSP has one decoder,
-shared with `opendspAacOpen()`. Later format changes, timeouts or lost context
+shared by AAC and MP3. Later format changes, timeouts or lost context
 stop playback.
+
+MP3 supports MPEG-1 Layer III at 32/44.1/48 kHz, mono/stereo, up to 320 kbit/s.
+AUTO selects DSP; ARM11 must be selected explicitly through `aac_backend`.
+Both codecs use that config field. See [MP3.md](MP3.md) for format limits.
 
 ## Controls
 
@@ -48,10 +52,10 @@ final queued PCM has played.
 - Pause retains the queue; Resume continues it. Play does nothing while active.
 - Stop cancels pending work and rewinds. Play restarts a finished or failed stream.
 - WAV Seek accepts a PCM frame position and preserves pause/play state. On a
-  stopped stream it sets the next starting position. AAC only supports Seek to zero.
+  stopped stream it sets the next starting position. AAC and MP3 only support Seek to zero.
 
 GetPosition reports audible PCM frames and wraps on loops. WAV duration is known
-at Open; AAC duration appears after a full pass. AAC loops reset decoder history;
+at Open; AAC/MP3 duration appears after a full pass. Compressed loops reset history;
 encoder padding can leave a gap. Changing loop mode cannot retract queued PCM.
 
 ## Channels and buffers
@@ -67,14 +71,19 @@ and scales the mix captured at Open or supplied by SetMix. Update routing throug
 SetMix when using library volume. Gains 4/5 and 8/9 send to
 [reverb and delay](GUIDE.md#reverb-and-delay).
 
-PCM and AAC use separate workers. Forward your ndsp callback to
-`opendspAudioNotifyFrame()` for prompt refills; otherwise active workers wait up
-to 5 ms. Idle workers sleep until a command.
+PCM and compressed codecs use separate workers. Forward your ndsp callback to
+`opendspAudioNotifyFrame()` for WAV/AAC refills; otherwise those workers wait up
+to 5 ms. DSP MP3 uses its own event and needs no application callback. Idle
+workers sleep until a command.
 
 Defaults are four buffers of 2048 frames for WAV or 1024 for AAC: 32 KiB and 16 KiB
 for stereo PCM16. Config controls queue size. AAC also needs 8 KiB input,
 4 KiB scratch PCM for DSP decoding or 16 KiB for ARM11, plus decoder storage.
 Each worker has a 16 KiB stack. An underrun pauses playback and buffers again.
+
+DSP MP3 defaults to four 1,152-frame buffers and a 32 KiB compressed ring.
+Custom queues require 3-8 buffers, 256-16,384 frames per buffer, and
+`(buffer_count - 1) * buffer_frames >= 2304`. ARM11 MP3 uses the PCM output worker.
 
 GetStats reports queue occupancy, underruns, loops, memory and timing.
 Read/decode/worker ticks include waits, so they aren't CPU load.

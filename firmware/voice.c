@@ -204,6 +204,10 @@ static u16 pull(voice_t *v, u16 at, u16 n)
         u32 left;
         u16 m;
         if (!v->has_current || v->position >= v->current.length) {
+            if (v->has_current) {
+                void aac_stream_played(u32 address);
+                aac_stream_played(v->current.address);
+            }
             v->has_current = 0;
             if (!dequeue(v))
                 break;

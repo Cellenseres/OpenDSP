@@ -54,6 +54,7 @@ jobs:
           path: |
             firmware/opendsp.cdc
             firmware/aac_tables.bin
+            firmware/mp3_tables.bin
             firmware/opendsp.elf
             firmware/opendsp.map
           if-no-files-found: error

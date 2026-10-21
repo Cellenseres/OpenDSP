@@ -4,6 +4,7 @@
 #include "opendsp.h"
 #include "internal.h"
 #include "extension.h"
+#include "codec_events.h"
 
 #define WAIT_STEP_NS 500000LL
 #define WAIT_STEPS 400 // 200 ms
@@ -70,14 +71,21 @@ Result opendsp_request(u16 command, const u16 *args, u16 arg_count, u16 *reply, 
     box[EXT_SEQUENCE] = sequence;
     __dsb();
     rc = OPENDSP_ERR_TIMEOUT;
-    for (i = 0; i < WAIT_STEPS; i++) {
+    u64 deadline = svcGetSystemTick() + (u64)SYSCLOCK_ARM11 / 5;
+    for (;;) {
         if (box[EXT_ACK] == sequence) {
             rc = status_to_result(box[EXT_STATUS]);
             for (u16 k = 0; k < reply_count; k++)
                 reply[k] = box[EXT_REPLY + k];
             break;
         }
-        svcSleepThread(WAIT_STEP_NS);
+        u64 now = svcGetSystemTick();
+        if (now >= deadline)
+            break;
+        if (opendsp_codec_events_active())
+            opendsp_mailbox_wait((s64)((deadline - now) * 1000000000ull / SYSCLOCK_ARM11));
+        else
+            svcSleepThread(WAIT_STEP_NS);
     }
     LightLock_Unlock(&lock);
     return rc;
@@ -90,7 +98,7 @@ Result opendspGetCapabilities(u32 *caps)
     if (!caps)
         return OPENDSP_ERR_ARGUMENT;
     if (!opendsp_running) {
-        *caps = OPENDSP_CAP_AAC_ARM11;
+        *caps = OPENDSP_CAP_AAC_ARM11 | OPENDSP_CAP_MP3_ARM11;
         return 0;
     }
     LightLock_Lock(&lock);
@@ -99,7 +107,7 @@ Result opendspGetCapabilities(u32 *caps)
         firmware = (((u32)box[EXT_CAPS_HI] << 16) | box[EXT_CAPS_LO]) & ~(u32)EXT_CAP_MAILBOX;
     LightLock_Unlock(&lock);
     // the firmware bits match OPENDSP_CAP_*
-    *caps = OPENDSP_CAP_AAC_ARM11 | firmware | (box ? OPENDSP_CAP_FIRMWARE : 0);
+    *caps = OPENDSP_CAP_AAC_ARM11 | OPENDSP_CAP_MP3_ARM11 | firmware | (box ? OPENDSP_CAP_FIRMWARE : 0);
     return 0;
 }
 

@@ -35,15 +35,19 @@ Reverb and delay run on the DSP through ndsp's two aux buses. Include
 `<opendsp/effects.h>` to configure them. The [guide](docs/GUIDE.md#reverb-and-delay)
 has an example, and Sound Lab includes Room, Hall, Plate and Cave presets.
 
-## WAV and AAC
+## WAV, AAC and MP3
 
-Use `<opendsp/audio.h>` to stream files with pause, looping and WAV seeking.
+Use `<opendsp/audio.h>` to stream WAV, AAC and MP3 with pause, looping and WAV seeking.
 It reads and buffers files in the background. See the [streaming guide](docs/STREAMING.md)
 and [example](examples/streaming).
 
 AAC-LC uses the DSP by default. ARM11 is available for standalone decoding and
 formats outside the DSP's limits. If you only need the decoder, use
 `<opendsp/aac.h>`; [AAC.md](docs/AAC.md) covers its API and format limits.
+
+MP3 runs on DSP by default, with ARM11 available explicitly. Both support
+MPEG-1 Layer III up to 320 kbit/s. Use `<opendsp/mp3.h>` for raw-frame decoding;
+[MP3.md](docs/MP3.md) covers formats and API use.
 
 ## Sound Lab
 

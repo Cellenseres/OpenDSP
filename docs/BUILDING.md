@@ -1,6 +1,6 @@
 # Building OpenDSP
 
-The library includes a prebuilt firmware and AAC tables. For a normal app you
+The library includes a prebuilt firmware and codec tables. For a normal app you
 only need devkitPro and libctru:
 
 ```sh
@@ -24,7 +24,7 @@ make -C firmware
 ```
 
 For an existing compiler build, pass `TEAK_LLVM=/path/to/build` to make. Keep
-`opendsp.cdc` and `aac_tables.bin` together, then rebuild the library and app.
+`opendsp.cdc`, `aac_tables.bin` and `mp3_tables.bin` together, then rebuild the library and app.
 
 To regenerate the DSP table source:
 

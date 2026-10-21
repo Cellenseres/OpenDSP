@@ -22,6 +22,7 @@ typedef struct {
     Result (*read)(audio_codec *, void *, u32, u32 *);
     Result (*seek)(audio_codec *, u64);
     void (*close)(audio_codec *);
+    Result (*stats)(audio_codec *, opendspAudioDecoderStats *);
 } audio_codec_ops;
 
 struct audio_codec {
@@ -32,8 +33,17 @@ struct audio_codec {
     u32 backend, memory;
     u64 position;
     void *data;
+    void *direct_pcm;
+    u32 direct_stride;
 };
-Result opendsp_audio_codec_open(audio_codec *c, const char *path, u32 backend);
+Result opendsp_audio_codec_open(audio_codec *c, const char *path, u32 backend, u32 count, u32 frames,
+                                u32 flags);
 void opendsp_audio_codec_close(audio_codec *c);
 Result opendsp_audio_wav_open(audio_codec *c);
 Result opendsp_audio_aac_open(audio_codec *c, u32 backend);
+Result opendsp_audio_mp3_open(audio_codec *c, u32 backend, u32 count, u32 frames, u32 flags);
+Result opendsp_audio_mp3_arm11_open(audio_codec *c);
+struct audio_output;
+Result opendsp_audio_mp3_pump(audio_codec *c, struct audio_output *out, bool *progress, bool *eof);
+void opendsp_audio_mp3_stop(audio_codec *c);
+void opendsp_audio_mp3_touch(audio_codec *c);

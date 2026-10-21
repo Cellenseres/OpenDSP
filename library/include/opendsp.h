@@ -26,7 +26,10 @@ extern "C" {
 #define OPENDSP_CAP_DELAY (1u << 1)
 #define OPENDSP_CAP_REVERB (1u << 2)
 #define OPENDSP_CAP_AAC_ARM11 (1u << 16) // AAC decoder in this library
+#define OPENDSP_CAP_MP3_ARM11 (1u << 17) // Explicit ARM11 MP3 decoder in this library
 #define OPENDSP_CAP_AAC_DSP (1u << 4)
+#define OPENDSP_CAP_MP3_DSP (1u << 5)
+#define OPENDSP_CAP_MP3_STREAM (1u << 6) // Event-driven byte ring and DSP-owned NDSP PCM
 
 // Replaces ndspInit().
 Result opendspInit(void);

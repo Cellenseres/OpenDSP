@@ -2,7 +2,8 @@
 #include <string.h>
 #include "codec.h"
 
-Result opendsp_audio_codec_open(audio_codec *c, const char *path, u32 backend)
+Result opendsp_audio_codec_open(audio_codec *c, const char *path, u32 backend, u32 count, u32 frames,
+                                u32 flags)
 {
     memset(c, 0, sizeof(*c));
     c->info.struct_size = sizeof(c->info);
@@ -23,6 +24,8 @@ Result opendsp_audio_codec_open(audio_codec *c, const char *path, u32 backend)
         r = opendsp_audio_wav_open(c);
     else if (got >= 7 && h[0] == 0xff && (h[1] & 0xf6) == 0xf0)
         r = opendsp_audio_aac_open(c, backend);
+    else if ((got >= 3 && !memcmp(h, "ID3", 3)) || (got >= 4 && h[0] == 255 && (h[1] & 0xe6) == 0xe2))
+        r = opendsp_audio_mp3_open(c, backend, count, frames ? frames : 1152, flags);
     else
         r = OPENDSP_AUDIO_ERR_FORMAT;
     if (R_SUCCEEDED(r))

@@ -2,6 +2,9 @@ firmware/*.o
 firmware/*.elf
 firmware/*.map
 firmware/aac/*.o
+firmware/mp3/*.o
+firmware/mp3/decoder.check.s
+firmware/aac/stream.check.s
 library/build/
 library/lib/
 examples/soundlab/build/

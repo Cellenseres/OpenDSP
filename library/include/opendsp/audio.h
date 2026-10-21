@@ -3,6 +3,7 @@
 #include <3ds/types.h>
 #include <3ds/result.h>
 #include <opendsp/aac.h>
+#include <opendsp/mp3.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,6 +11,7 @@ extern "C" {
 
 #define OPENDSP_AUDIO_CHANNEL_AUTO (-1)
 #define OPENDSP_AUDIO_LOOP (1u << 0)
+#define OPENDSP_AUDIO_PROFILE (1u << 1) // Optional MP3 stage timers; off for normal playback
 #define OPENDSP_AUDIO_ERR_ARGUMENT MAKERESULT(RL_USAGE, RS_INVALIDARG, RM_DSP, 0x2B0)
 #define OPENDSP_AUDIO_ERR_STATE MAKERESULT(RL_USAGE, RS_INVALIDSTATE, RM_DSP, 0x2B1)
 #define OPENDSP_AUDIO_ERR_BUSY MAKERESULT(RL_STATUS, RS_WOULDBLOCK, RM_DSP, 0x2B2)
@@ -21,6 +23,7 @@ extern "C" {
 #define OPENDSP_AUDIO_ERR_CONTEXT MAKERESULT(RL_TEMPORARY, RS_INVALIDSTATE, RM_DSP, 0x2B8)
 
 typedef struct opendspAudioStream opendspAudioStream;
+typedef opendspMp3Stats opendspAudioDecoderStats;
 typedef enum {
     OPENDSP_AUDIO_STOPPED,
     OPENDSP_AUDIO_BUFFERING,
@@ -31,14 +34,14 @@ typedef enum {
     OPENDSP_AUDIO_STOPPING,
     OPENDSP_AUDIO_ERROR
 } opendspAudioState;
-typedef enum { OPENDSP_AUDIO_WAV, OPENDSP_AUDIO_AAC } opendspAudioFormat;
+typedef enum { OPENDSP_AUDIO_WAV, OPENDSP_AUDIO_AAC, OPENDSP_AUDIO_MP3 } opendspAudioFormat;
 
 typedef struct {
     u32 struct_size;
     s32 channel;
-    u32 buffer_count;  // 0 = 4; otherwise 2..8
-    u32 buffer_frames; // 0 = WAV 2048 / AAC 1024; otherwise 256..16384
-    u32 aac_backend;   // OPENDSP_AAC_BACKEND_*
+    u32 buffer_count;  // 0 = 4; otherwise 2..8 (MP3: 3..8)
+    u32 buffer_frames; // 0 = WAV 2048 / AAC 1024 / MP3 1152; otherwise 256..16384
+    u32 aac_backend;   // AAC/MP3 backend; MP3 AUTO requires DSP, ARM11 is explicit
     u32 flags;
 } opendspAudioConfig;
 #define OPENDSP_AUDIO_CONFIG_INIT                                                                            \
@@ -49,9 +52,9 @@ typedef struct {
     opendspAudioFormat format;
     u32 sample_rate;
     u16 channels, bits;
-    u64 total_frames; // AAC: known after a complete pass; includes encoder padding
+    u64 total_frames; // Compressed: known after a complete pass; includes encoder padding
     bool duration_known;
-    u32 aac_flags; // Accumulated OPENDSP_AAC_INFO_* flags
+    u32 aac_flags; // Accumulated codec INFO_* flags (MP3 uses CHANGED/DISCONTINUITY)
 } opendspAudioInfo;
 
 typedef struct {
@@ -77,7 +80,7 @@ Result opendspAudioPlay(opendspAudioStream *stream);
 Result opendspAudioPause(opendspAudioStream *stream);
 Result opendspAudioResume(opendspAudioStream *stream);
 Result opendspAudioStop(opendspAudioStream *stream);
-Result opendspAudioSeek(opendspAudioStream *stream, u64 frame); // AAC supports only 0
+Result opendspAudioSeek(opendspAudioStream *stream, u64 frame); // AAC/MP3 support only 0
 // On BUSY the handle and channel remain owned; retry. Success sets *stream = NULL.
 Result opendspAudioClose(opendspAudioStream **stream);
 Result opendspAudioSetLoop(opendspAudioStream *stream, bool loop);
@@ -87,12 +90,15 @@ Result opendspAudioSetRate(opendspAudioStream *stream, float sample_rate);  // P
 // GetInfo/GetStats require output.struct_size = sizeof(output).
 Result opendspAudioGetInfo(opendspAudioStream *stream, opendspAudioInfo *info);
 Result opendspAudioGetStats(opendspAudioStream *stream, opendspAudioStats *stats);
+// DSP-only decoder counters. MP3 stage timings require AUDIO_PROFILE; AAC leaves
+// those six fields zero. This performs mailbox queries; sample at a low rate.
+Result opendspAudioGetDecoderStats(opendspAudioStream *stream, opendspAudioDecoderStats *stats);
 opendspAudioState opendspAudioGetState(opendspAudioStream *stream);
 u64 opendspAudioGetPosition(opendspAudioStream *stream); // audible PCM frames, not file read-ahead
 u32 opendspAudioGetBackend(opendspAudioStream *stream);  // AUTO for WAV
 s32 opendspAudioGetChannel(opendspAudioStream *stream);
 Result opendspAudioGetLastError(opendspAudioStream *stream);
-// Optional NDSP callback forwarding; active workers otherwise use a timed wait.
+// Optional NDSP callback forwarding for WAV/AAC. MP3 uses its own DSP pipe event.
 void opendspAudioNotifyFrame(void);
 
 #ifdef __cplusplus
