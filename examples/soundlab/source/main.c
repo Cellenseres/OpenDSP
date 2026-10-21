@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: BSD-2-Clause
-// OpenDSP Sound Lab demo app.
 #include <3ds.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -9,14 +8,13 @@
 #include "audio.h"
 #include "wav.h"
 #include "gfx.h"
+#include "monitor.h"
 #include <opendsp.h>
 #include <opendsp/aac.h>
 
 #define APP_VERSION "1.2.1"
 
 static PrintConsole bottom;
-
-// bottom screen
 
 #define C_RESET "\x1b[0m"
 #define C_HEAD "\x1b[46;30m"
@@ -58,23 +56,14 @@ static void hints(const char *h)
     printf("\x1b[29;1H" C_HINT "%-39.39s" C_RESET, h);
 }
 
-// pages
-
-enum { P_MAIN, P_MUSIC, P_SFX, P_WAV, P_KEYS, P_FX, P_VERB, P_LAB, P_ABOUT, P_COUNT };
+enum { P_MAIN, P_MUSIC, P_SFX, P_WAV, P_KEYS, P_FX, P_VERB, P_LAB, P_MONITOR, P_ABOUT, P_COUNT };
 static int page = P_MAIN, cursor[P_COUNT], items;
 static bool dirty = true, quit;
 static char message[80];
 
-static const char *main_items[] = {"Music: \"Teak Street\"",
-                                   "Sound effects",
-                                   "WAV / AAC player (SD card)",
-                                   "Touch keyboard",
-                                   "Mixer & filters",
-                                   "Reverb & delay",
-                                   "DSP lab",
-                                   "About",
-                                   "Exit"};
-#define MAIN_ITEMS 9
+static const char *main_items[] = {"Music",   "Sound effects", "Files",        "Keyboard", "Mixer",
+                                   "Effects", "DSP lab",       "Live monitor", "About",    "Exit"};
+#define MAIN_ITEMS 10
 
 static const char *on_off(bool b)
 {
@@ -84,11 +73,9 @@ static const char *on_off(bool b)
 static void draw_main(void)
 {
     header("");
-    line(3, C_DIM " Every sound here is played by");
-    line(4, C_DIM " the OpenDSP firmware.");
     items = MAIN_ITEMS;
     for (int i = 0; i < items; i++)
-        item(6 + i, cursor[page] == i, main_items[i], "");
+        item(4 + 2 * i, cursor[page] == i, main_items[i], "");
     hints(" A select   B back   START exit");
 }
 
@@ -101,7 +88,7 @@ static void draw_music(void)
     snprintf(v, sizeof v, "%d BPM", music_bpm());
     item(4, cursor[page] == 1, "Tempo", v);
     snprintf(v, sizeof v, "%d %%", S.speed);
-    item(5, cursor[page] == 2, "Pitch (also WAV speed)", v);
+    item(5, cursor[page] == 2, "Pitch", v);
     line(7, C_DIM "  Tracks (A: mute)");
     for (int t = 0; t < NUM_TRACKS; t++) {
         char label[40];
@@ -113,10 +100,7 @@ static void draw_music(void)
              music_bar() + 1, music_step() + 1, music_chord());
     else
         line(15, "");
-    line(17, C_DIM "  8 bars in A minor on 6 channels:");
-    line(18, C_DIM "  3 synth voices from 64-sample tables,");
-    line(19, C_DIM "  drums as PCM16, PCM8 and DSP-ADPCM.");
-    hints(" A select  </> change  L/R x10  B back");
+    hints(" A select  </> adjust  L/R fast  B back");
 }
 
 static void draw_sfx(void)
@@ -125,22 +109,18 @@ static void draw_sfx(void)
     items = sfx_count();
     for (int i = 0; i < items; i++)
         item(3 + i, cursor[page] == i, sfx_name(i), sfx_format(i));
-    line(14, C_DIM "  Six channels, every press");
-    line(15, C_DIM "  starts a new sound.");
     hints(" A play   B back");
 }
 
 static void draw_wav(void)
 {
-    header("WAV / AAC player");
+    header("Files");
     if (!wav_count()) {
         items = 1;
         item(3, cursor[page] == 0, "Rescan SD card", "");
-        line(5, "  No .wav or .aac files found. Copy");
-        line(6, "  some to " C_VAL "SD:/3ds/opendsp-lab/");
-        line(8, C_DIM "  WAV: PCM 8/16-bit, up to 130 kHz.");
-        line(9, C_DIM "  AAC: AAC-LC in ADTS, mono/stereo,");
-        line(10, C_DIM "  ARM11 or Teak DSP backend.");
+        line(7, "  No audio files found.");
+        line(9, C_DIM "  SD:/3ds/opendsp-lab/");
+        line(10, C_DIM "  WAV, AAC or MP3");
         hints(" A rescan   B back");
         return;
     }
@@ -148,54 +128,69 @@ static void draw_wav(void)
     item(3, cursor[page] == 0, "Stop", "");
     item(4, cursor[page] == 1, "Loop", on_off(wav_loop()));
     item(5, cursor[page] == 2, "Rescan SD card", "");
-    line(6, C_DIM "  AAC: %s  [X]", wav_backend() == OPENDSP_AAC_BACKEND_DSP ? "Teak DSP" : "ARM11 (CPU)");
-    int first = cursor[page] - 3 - 6;
+    line(6, C_DIM "  Decoder: %s", wav_backend() == OPENDSP_AAC_BACKEND_DSP ? "DSP" : "ARM11");
+    int first = cursor[page] - 9;
     if (first < 0)
         first = 0;
-    for (int r = 0; r < 14; r++) {
-        int i = first + r;
-        if (i >= wav_count()) {
-            line(7 + r, "");
-            continue;
-        }
-        item(7 + r, cursor[page] == 3 + i, wav_name(i), "");
+    for (int row = 0; row < 13; row++) {
+        int index = first + row;
+        if (index < wav_count())
+            item(7 + row, cursor[page] == 3 + index, wav_name(index), "");
+        else
+            line(7 + row, "");
     }
+    float progress = wav_progress();
     if (wav_playing()) {
-        char progress[8];
-        float fraction = wav_progress();
-        if (fraction < 0)
-            snprintf(progress, sizeof(progress), "--");
+        if (progress >= 0)
+            line(21, "  %s  " C_VAL "%d%%", wav_status(), (int)(progress * 100));
         else
-            snprintf(progress, sizeof(progress), "%d%%", (int)(fraction * 100));
-        float load = wav_decode_load();
-        if (load >= 0)
-            line(21, "  " C_DIM "CPU decode (est.): %.1f%%", load * 100);
-        else if (wav_active_backend() == OPENDSP_AAC_BACKEND_DSP)
-            line(21, "  " C_DIM "CPU: I/O + transport (unmeasured)");
-        else
-            line(21, "  " C_DIM "CPU: PCM streaming (unmeasured)");
-        line(23, "  " C_OK "%s", wav_info());
-        opendspAudioStats stream_stats = {.struct_size = sizeof(stream_stats)};
-        if (wav_stats(&stream_stats))
-            line(24, "  %4s  Q %lu  underruns %lu", progress, (unsigned long)stream_stats.queued_frames,
-                 (unsigned long)stream_stats.underruns);
-        else
-            line(24, "  " C_VAL "%s", progress);
+            line(21, "  %s", wav_status());
+        line(22, "  %s", wav_info());
+        opendspAudioStats stats = {.struct_size = sizeof(stats)};
+        if (wav_stats(&stats))
+            line(24, "  Underruns  " C_VAL "%lu", (unsigned long)stats.underruns);
     } else {
-        line(21, "  %.36s", wav_error());
-        line(23, "");
-        line(24, "");
+        line(21, "  %s", wav_status());
+        line(22, C_WARN "  %.36s", wav_error());
     }
-    opendspStats st = {sizeof st};
-    if (R_SUCCEEDED(opendspGetStats(&st, false)))
-        line(22, "  DSP total: " C_VAL "%.1f%%" C_RESET "  peak " C_VAL "%.1f%%", st.load * 100,
-             st.load_max * 100);
-    else
-        line(22, "  " C_DIM "DSP total: unavailable");
-    hints(" A play   X AAC backend   B back");
+    hints(" A play  X decoder  Y monitor  B back");
 }
 
-// keyboard: two octaves, white keys 2 columns wide
+static void draw_monitor(void)
+{
+    const monitor_view *m = monitor_get();
+    header("Live monitor");
+    items = 0;
+    line(3, "  Decoder     " C_VAL "%s", monitor_backend());
+    if (m->have_dsp) {
+        line(6, "  DSP load    " C_VAL "%.1f%%", m->dsp.load * 100);
+        line(7, "  Peak        " C_VAL "%.1f%%", m->dsp.load_max * 100);
+    } else {
+        line(6, "  DSP load    " C_DIM "--");
+        line(7, "  Peak        " C_DIM "--");
+    }
+    if (m->arm_decode >= 0)
+        line(10, "  CPU decode  " C_VAL "%.1f%%", m->arm_decode * 100);
+    else
+        line(10, "  CPU decode  " C_DIM "%s",
+             m->have_stream && m->backend == OPENDSP_AAC_BACKEND_DSP ? "Inactive" : "--");
+    line(11, C_DIM "  Estimated decoder load only");
+    if (m->have_stream) {
+        line(14, "  Queued      " C_VAL "%lu buffers", (unsigned long)m->stream.queued_buffers);
+        line(15, "  Underruns   " C_VAL "%lu", (unsigned long)m->stream.underruns);
+    } else {
+        line(14, "  Queued      " C_DIM "--");
+        line(15, "  Underruns   " C_DIM "--");
+    }
+    line(18, "  Playback    %s", wav_status());
+    if (m->held)
+        line(21, C_DIM "  Display paused");
+    line(24, C_DIM "  Decoder changes restart playback.");
+    line(26, C_DIM "  L: ARM11   R: DSP");
+    hints(" A reset  X hold  Y decoder  B back");
+}
+
+// Two octaves, two console columns per key.
 #define KB_TOP 16
 #define KB_BLACK_ROWS 6
 #define KB_ROWS 11
@@ -211,7 +206,7 @@ static int keyboard_base(void)
 
 static void draw_keys(void)
 {
-    header("Touch keyboard");
+    header("Keyboard");
     items = 0;
     line(3, "  Wave   " C_VAL "%-12s" C_RESET " (L / R)", audio_wave_name(S.key_wave));
     line(4, "  Octave " C_VAL "C%d" C_RESET "           (Up / Down)", S.key_octave);
@@ -250,14 +245,14 @@ static const char *interp_names[3] = {"Polyphase", "Linear", "None"};
 static void draw_fx(void)
 {
     char v[32];
-    header("Mixer & filters");
+    header("Mixer");
     items = 9;
     snprintf(v, sizeof v, "%d %%", S.master);
     item(3, cursor[page] == 0, "Master volume", v);
     item(4, cursor[page] == 1, "Output mode", output_names[S.output]);
     item(5, cursor[page] == 2, "Clipping", S.clip ? "Soft" : "Normal");
     item(6, cursor[page] == 3, "Interpolation", interp_names[S.interp]);
-    item(7, cursor[page] == 4, "Filter (music + WAV)", audio_filter_name(S.filter));
+    item(7, cursor[page] == 4, "Filter", audio_filter_name(S.filter));
     snprintf(v, sizeof v, "%d Hz", S.cutoff);
     item(8, cursor[page] == 5, "Filter frequency", v);
     snprintf(v, sizeof v, "%+d", S.pan);
@@ -265,20 +260,16 @@ static void draw_fx(void)
     snprintf(v, sizeof v, "%d %%", S.surround);
     item(10, cursor[page] == 7, "Surround depth", v);
     item(11, cursor[page] == 8, "Menu sounds", on_off(S.ui_sounds));
-    line(13, C_DIM "  Play the music, then sweep the");
-    line(14, C_DIM "  filter frequency with L/R.");
-    line(16, C_DIM "  Compare Polyphase and None at");
-    line(17, C_DIM "  50 %% pitch.");
-    hints(" </> change   L/R x10   B back");
+    hints(" </> adjust   L/R fast   B back");
 }
 
 static void draw_verb(void)
 {
     char v[32];
-    header("Reverb & delay");
+    header("Effects");
     if (!audio_effects_available()) {
         items = 0;
-        line(3, C_WARN "  This firmware has no DSP effects.");
+        line(3, C_WARN "  Effects unavailable.");
         hints(" B back");
         return;
     }
@@ -295,12 +286,7 @@ static void draw_verb(void)
     item(9, cursor[page] == 5, "Delay time", v);
     snprintf(v, sizeof v, "%d %%", S.delay_feedback);
     item(10, cursor[page] == 6, "Delay feedback", v);
-    line(13, C_DIM "  Both effects run on the DSP:");
-    line(14, C_DIM "  reverb on aux bus 0, delay on 1.");
-    line(16, C_DIM "  Play the music or the keyboard");
-    line(17, C_DIM "  and change the settings.");
-    line(19, C_DIM "  Firmware %d.%d", audio_firmware_version() >> 8, audio_firmware_version() & 0xFF);
-    hints(" </> change   L/R x10   B back");
+    hints(" </> adjust   L/R fast   B back");
 }
 
 static int clamp_int(int v, int lo, int hi)
@@ -347,24 +333,22 @@ static void draw_lab(void)
 {
     header("DSP lab");
     items = 5;
-    item(3, cursor[page] == 0, "24-voice chord pad", on_off(lab_chord_on()));
-    item(4, cursor[page] == 1, "Re-trigger burst (36 sounds)", "");
-    item(5, cursor[page] == 2, "Formats: PCM16 > PCM8 > ADPCM", "");
+    item(3, cursor[page] == 0, "24-voice chord", on_off(lab_chord_on()));
+    item(4, cursor[page] == 1, "Sound burst", "");
+    item(5, cursor[page] == 2, "PCM formats", "");
     item(6, cursor[page] == 3, "Interpolation", interp_names[S.interp]);
-    item(7, cursor[page] == 4, "Stop everything", "");
+    item(7, cursor[page] == 4, "Stop all", "");
     int active = 0;
     for (int ch = 0; ch < 24; ch++)
         active += ndspChnIsPlaying(ch);
     opendspStats st = {sizeof st};
     bool have_stats = R_SUCCEEDED(opendspGetStats(&st, false));
-    line(10, "  Frames      " C_VAL "%lu", (unsigned long)audio_frames());
-    line(11, "  Dropped     " C_VAL "%lu", (unsigned long)audio_dropped());
-    line(12, "  Channels    " C_VAL "%d / 24" C_RESET " playing", active);
+    line(10, "  Voices      " C_VAL "%d / 24", active);
     if (have_stats) {
-        line(13, "  DSP load    " C_VAL "%d %%" C_RESET "  peak " C_VAL "%d %%", (int)(st.load * 100 + 0.5f),
-             (int)(st.load_max * 100 + 0.5f));
-        line(14, "  Late frames " C_VAL "%lu", (unsigned long)st.late_frames);
+        line(12, "  DSP load    " C_VAL "%.1f%%", st.load * 100);
+        line(13, "  Peak        " C_VAL "%.1f%%", st.load_max * 100);
     }
+    line(15, "  Dropped     " C_VAL "%lu", (unsigned long)audio_dropped());
     hints(" A start  </> change  B back");
 }
 
@@ -372,16 +356,11 @@ static void draw_about(void)
 {
     header("About");
     items = 0;
-    line(3, "  " C_OK "OpenDSP" C_RESET " - open-source DSP");
-    line(4, "  firmware for the Nintendo 3DS");
-    line(6, C_DIM "  24 voices, PCM8, PCM16, DSP-ADPCM,");
-    line(7, C_DIM "  three interpolation modes, filters,");
-    line(8, C_DIM "  aux buses, reverb, delay, surround.");
-    line(10, "  The firmware is built into this app");
-    line(11, "  and started with " C_VAL "opendspInit()" C_RESET ".");
-    line(13, C_DIM "  Made by Cellenseres");
-    line(14, C_DIM "  BSD 2-Clause license");
-    line(15, C_DIM "  Sound Lab " APP_VERSION);
+    line(4, "  " C_OK "OpenDSP Sound Lab");
+    line(6, C_DIM "  Nintendo 3DS audio firmware");
+    line(10, "  Version " APP_VERSION);
+    line(12, "  Cellenseres");
+    line(14, C_DIM "  BSD 2-Clause");
     hints(" B back");
 }
 
@@ -414,6 +393,9 @@ static void draw_bottom(void)
     case P_LAB:
         draw_lab();
         break;
+    case P_MONITOR:
+        draw_monitor();
+        break;
     case P_ABOUT:
         draw_about();
         break;
@@ -421,8 +403,6 @@ static void draw_bottom(void)
     if (message[0])
         line(27, C_WARN " %s", message);
 }
-
-// input
 
 static void adjust_fx(int index, int delta, int big)
 {
@@ -464,6 +444,8 @@ static void adjust_fx(int index, int delta, int big)
 static void go(int p)
 {
     page = p;
+    if (p == P_MONITOR)
+        monitor_reset();
     message[0] = 0;
     dirty = true;
 }
@@ -561,7 +543,8 @@ static void input(void)
 
     if (down & KEY_B) {
         if (page != P_MAIN) {
-            ui_blip(2);
+            if (page != P_MONITOR)
+                ui_blip(2);
             go(P_MAIN);
         }
         return;
@@ -570,12 +553,14 @@ static void input(void)
     switch (page) {
     case P_MAIN:
         if (down & KEY_A) {
-            static const int pages[8] = {P_MUSIC, P_SFX, P_WAV, P_KEYS, P_FX, P_VERB, P_LAB, P_ABOUT};
-            ui_blip(1);
-            if (*c == 8) {
+            static const int pages[MAIN_ITEMS - 1] = {P_MUSIC, P_SFX, P_WAV,     P_KEYS, P_FX,
+                                                      P_VERB,  P_LAB, P_MONITOR, P_ABOUT};
+            if (*c == MAIN_ITEMS - 1) {
                 quit = true;
                 return;
             }
+            if (pages[*c] != P_MONITOR)
+                ui_blip(1);
             if (pages[*c] == P_WAV)
                 wav_scan();
             go(pages[*c]);
@@ -608,6 +593,10 @@ static void input(void)
             sfx_play(*c);
         break;
     case P_WAV:
+        if (down & KEY_Y) {
+            go(P_MONITOR);
+            break;
+        }
         if (down & KEY_X) {
             wav_set_backend(wav_backend() == OPENDSP_AAC_BACKEND_DSP ? OPENDSP_AAC_BACKEND_ARM11
                                                                      : OPENDSP_AAC_BACKEND_DSP);
@@ -641,6 +630,30 @@ static void input(void)
             }
             dirty = true;
         }
+        break;
+    case P_MONITOR:
+        if (down & KEY_A)
+            monitor_reset();
+        if (down & KEY_X)
+            monitor_hold();
+        if (down & (KEY_Y | KEY_L | KEY_R)) {
+            char error[80];
+            bool switched;
+            if (down & KEY_L)
+                switched = wav_select_backend(OPENDSP_AAC_BACKEND_ARM11, error, sizeof(error));
+            else if (down & KEY_R)
+                switched = wav_select_backend(OPENDSP_AAC_BACKEND_DSP, error, sizeof(error));
+            else
+                switched = wav_compare_backend(error, sizeof(error));
+            monitor_rebase();
+            monitor_update(svcGetSystemTick());
+            if (!switched)
+                snprintf(message, sizeof(message), "Switch failed: %.60s", error);
+            else
+                message[0] = 0;
+        }
+        if (down & (KEY_A | KEY_X | KEY_Y | KEY_L | KEY_R))
+            dirty = true;
         break;
     case P_FX:
         if (delta) {
@@ -692,8 +705,6 @@ static void input(void)
     }
 }
 
-// top screen
-
 static float level_l, level_r;
 
 static void draw_top(void)
@@ -736,8 +747,8 @@ static void draw_top(void)
 
     // level meters
     float nl = peak_l / 32768.f, nr = peak_r / 32768.f;
-    level_l = nl > level_l ? nl : level_l * 0.92f;
-    level_r = nr > level_r ? nr : level_r * 0.92f;
+    level_l = nl > level_l ? nl : level_l * 0.85f;
+    level_r = nr > level_r ? nr : level_r * 0.85f;
     const int my = 140, mw = 376 - 20;
     gfx_text(sx, my, "L", cyan, 1);
     gfx_text(sx, my + 10, "R", orange, 1);
@@ -774,7 +785,7 @@ static void draw_top(void)
         snprintf(b, sizeof b, "NOW: TEAK STREET  %d BPM  BAR %d  %s", music_bpm(), music_bar() + 1,
                  music_chord());
     else if (wav_playing())
-        snprintf(b, sizeof b, "NOW: WAV %s", wav_info());
+        snprintf(b, sizeof b, "NOW: %s", wav_info());
     else
         snprintf(b, sizeof b, "READY");
     gfx_text(sx, 218, b, cyan, 1);
@@ -806,23 +817,32 @@ int main(void)
     }
     wav_scan();
 
-    u64 last_refresh = 0;
+    u64 last_refresh = 0, last_top_refresh = 0;
     while (aptMainLoop() && !quit) {
         input();
         if (quit)
             break;
         u64 now = osGetTime();
-        if ((page == P_MUSIC || page == P_WAV || page == P_LAB) && now - last_refresh > 200) {
+        if (page == P_MONITOR && monitor_update(svcGetSystemTick()))
+            dirty = true;
+        if ((page == P_MUSIC || page == P_WAV || page == P_LAB) && now - last_refresh >= 250) {
             dirty = true;
             last_refresh = now;
         }
+        bool redraw = dirty;
         if (dirty) {
             draw_bottom();
             dirty = false;
         }
-        draw_top();
-        gfxFlushBuffers();
-        gfxSwapBuffers();
+        if (redraw || (page != P_MONITOR && now - last_top_refresh >= 33)) {
+            if (page == P_MONITOR)
+                monitor_draw_top();
+            else
+                draw_top();
+            gfxFlushBuffers();
+            gfxSwapBuffers();
+            last_top_refresh = now;
+        }
         gspWaitForVBlank();
     }
     stop_all();

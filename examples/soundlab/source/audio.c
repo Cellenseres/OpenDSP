@@ -14,7 +14,23 @@
 #define TABLE_LEN   64
 #define PI_F        3.14159265f
 
-settings_t S = {80, 1, 1, 0, 100, 0, 1500, 0, 50, 1, 3, 4, 2, 35, 70, 26, 0, 300, 35};
+settings_t S = {
+    .master = 80,
+    .output = 1,
+    .clip = 1,
+    .speed = 100,
+    .cutoff = 1500,
+    .surround = 50,
+    .ui_sounds = 1,
+    .key_wave = 3,
+    .key_octave = 4,
+    .reverb = 2,
+    .reverb_send = 35,
+    .reverb_return = 70,
+    .reverb_decay = 26,
+    .delay_ms = 300,
+    .delay_feedback = 35,
+};
 
 // sounds
 
@@ -616,8 +632,8 @@ static void sequencer_main(void *arg)
 
 const char *audio_filter_name(int f)
 {
-    static const char *names[] = {"Off", "Low-pass (1-pole)", "High-pass (1-pole)", "Low-pass (biquad)",
-                                  "High-pass (biquad)", "Band-pass (biquad)", "Notch (biquad)"};
+    static const char *names[] = {"Off", "Low-pass", "High-pass", "Low-pass biquad",
+                                  "High-pass biquad", "Band-pass", "Notch"};
     return f >= 0 && f < (int)(sizeof names / sizeof names[0]) ? names[f] : "?";
 }
 
@@ -662,13 +678,11 @@ static const reverb_preset_t presets[] = {
     {"Cave", 1.0f, 6.0f, 0.6f, 0.5f, 1.0f, 0.6f},
 };
 static u32 caps;
-static u16 firmware_version;
 
 const char *audio_reverb_name(int p) { return p >= 0 && p < audio_reverb_count() ? presets[p].name : "?"; }
 int audio_reverb_count(void) { return sizeof presets / sizeof presets[0]; }
 float audio_reverb_default_decay(int p) { return presets[p].decay; }
 bool audio_effects_available(void) { return (caps & OPENDSP_CAP_REVERB) && (caps & OPENDSP_CAP_DELAY); }
-u16 audio_firmware_version(void) { return firmware_version; }
 
 void audio_apply_effects(void)
 {
@@ -717,7 +731,6 @@ bool audio_init(char *error, size_t error_len)
     capture.nsamples = CAPTURE_FRAMES;
     ndspSetCapture(&capture);
     opendspGetCapabilities(&caps);
-    opendspGetFirmwareVersion(&firmware_version);
     audio_apply_settings();
     audio_apply_effects();
     ndspSetCallback(on_frame, NULL);

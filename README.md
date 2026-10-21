@@ -51,9 +51,9 @@ MPEG-1 Layer III up to 320 kbit/s. Use `<opendsp/mp3.h>` for raw-frame decoding;
 
 ## Sound Lab
 
-[Sound Lab](examples/soundlab) lets you try music, sound effects, WAV/AAC files,
-filters and effects. It also shows DSP load. Put your music in
-`sdmc:/3ds/opendsp-lab/` and press X in the player to switch AAC backends.
+[Sound Lab](examples/soundlab) lets you try music, sound effects, WAV/AAC/MP3 files,
+filters and effects. The live monitor shows DSP load and the active decoder. Put your music in
+`sdmc:/3ds/opendsp-lab/` and press X in the player to switch decoders.
 
 [CIA and 3DSX downloads](dist/soundlab) are included. You can also build it with
 `make -C examples/soundlab` or `make -C examples/soundlab cia`.
