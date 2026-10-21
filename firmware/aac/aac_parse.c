@@ -19,7 +19,7 @@ s16 d_scalefactor[2 * BANDS] __attribute__((section(".aac_sf")));
 u16 d_ms_used[BANDS] __attribute__((section(".aac_ms")));
 u16 d_tns[2 * 8 * TNS_WORDS];
 u16 d_tns_count[2];
-u16 d_spec[2 * 2048];
+u16 d_spec[2 * 2048] __attribute__((aligned(4))); // also the MP3 s32 spectral overlay
 u16 d_swb_long[52], d_swb_short[16];
 u16 d_ms_mask_present, d_sf_index, d_channels, d_configured, d_synced, d_sbr_seen;
 u16 d_prev_shape[2];

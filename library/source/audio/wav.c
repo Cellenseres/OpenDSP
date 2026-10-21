@@ -59,7 +59,7 @@ static void wav_close(audio_codec *c)
     free(c->data);
     c->data = NULL;
 }
-static const audio_codec_ops wav_ops = {wav_read, wav_seek, wav_close};
+static const audio_codec_ops wav_ops = {wav_read, wav_seek, wav_close, NULL};
 
 Result opendsp_audio_wav_open(audio_codec *c)
 {

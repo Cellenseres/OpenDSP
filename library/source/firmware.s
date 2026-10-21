@@ -15,3 +15,8 @@ opendsp_firmware_size:
     .global opendsp_aac_tables
 opendsp_aac_tables:
     .incbin "aac_tables.bin"
+    .section .rodata.opendsp_mp3_tables, "a"
+    .balign 4
+    .global opendsp_mp3_tables
+opendsp_mp3_tables:
+    .incbin "mp3_tables.bin"

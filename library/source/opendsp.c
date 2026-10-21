@@ -3,6 +3,7 @@
 #include <string.h>
 #include "opendsp.h"
 #include "internal.h"
+#include "codec_events.h"
 
 bool opendsp_running;
 void opendsp_audio_before_exit(void) __attribute__((weak));
@@ -36,6 +37,7 @@ void opendspExit(void)
 {
     if (opendsp_audio_before_exit)
         opendsp_audio_before_exit();
+    opendsp_codec_events_stop();
     ndspExit();
     opendsp_running = false;
     opendsp_aac_release();

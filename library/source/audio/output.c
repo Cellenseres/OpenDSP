@@ -3,16 +3,17 @@
 #include "output.h"
 
 Result opendsp_audio_output_open(audio_output *o, int channel, u32 count, u32 frames,
-                                 const opendspAudioInfo *info)
+                                 const opendspAudioInfo *info, void *borrowed, u32 stride)
 {
     memset(o, 0, sizeof(*o));
     o->channel = channel;
     o->count = count;
     o->frames = frames;
     o->frame_bytes = info->channels * info->bits / 8;
-    o->stride = (frames * o->frame_bytes + 31) & ~31u;
+    o->stride = borrowed ? stride : (frames * o->frame_bytes + 31) & ~31u;
     o->bytes = o->stride * count;
-    o->memory = linearMemAlign(o->bytes, 128);
+    o->memory = borrowed ? borrowed : linearMemAlign(o->bytes, 128);
+    o->borrowed = borrowed != NULL;
     if (!o->memory)
         return OPENDSP_AUDIO_ERR_MEMORY;
     for (u32 i = 0; i < count; ++i)
@@ -55,6 +56,7 @@ void opendsp_audio_output_reap(audio_output *o)
             if (end > o->completed)
                 o->completed = end;
             b->queued = false;
+            ++o->played;
             --o->queued;
             o->queued_frames -= b->wave.nsamples;
         } else if (b->wave.sequence_id == seq && status == NDSP_WBUF_PLAYING) {
@@ -72,7 +74,7 @@ int opendsp_audio_output_free(const audio_output *o)
     if (o->retiring)
         return -1;
     for (u32 i = 0; i < o->count; ++i)
-        if (!o->buffers[i].queued)
+        if (!o->buffers[i].queued && !o->buffers[i].pending)
             return (int)i;
     return -1;
 }
@@ -91,7 +93,10 @@ void opendsp_audio_output_queue(audio_output *o, int buffer, u32 frames)
     o->submitted += frames;
     ++o->queued;
     o->queued_frames += frames;
-    DSP_FlushDataCache(opendsp_audio_output_data(o, buffer), (frames * o->frame_bytes + 31) & ~31u);
+    /* Borrowed PCM is DSP-produced. ARM must never flush stale cache lines
+     * over it. Its initial clean/invalidate precedes the firmware lease. */
+    if (!o->borrowed)
+        DSP_FlushDataCache(opendsp_audio_output_data(o, buffer), (frames * o->frame_bytes + 31) & ~31u);
     ndspChnWaveBufAdd(o->channel, &b->wave);
     o->touched = true;
 }
@@ -140,6 +145,7 @@ void opendsp_audio_output_reset(audio_output *o, u64 position)
 
 void opendsp_audio_output_close(audio_output *o)
 {
-    linearFree(o->memory);
+    if (!o->borrowed)
+        linearFree(o->memory);
     o->memory = NULL;
 }

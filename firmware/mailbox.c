@@ -8,10 +8,12 @@
 #include "stats.h"
 #include "aac/stream.h"
 #include "aac_protocol.h"
+#include "mp3_protocol.h"
 
 #define BOX ((vu16 *)EXT_BASE)
 #define FIRMWARE_VERSION 0x0102
-#define CAPABILITIES (EXT_CAP_MAILBOX | EXT_CAP_DELAY | EXT_CAP_REVERB | AAC_CAP_DSP)
+#define CAPABILITIES                                                                                         \
+    (EXT_CAP_MAILBOX | EXT_CAP_DELAY | EXT_CAP_REVERB | AAC_CAP_DSP | MP3_CAP_DSP | MP3_CAP_STREAM)
 
 void mailbox_init(void)
 {
@@ -97,7 +99,8 @@ static u16 read_stats(vu16 *args)
 
 static u16 handle(u16 command, vu16 *args)
 {
-    if (command >= AAC_CMD_OPEN && command <= AAC_CMD_STATS)
+    if ((command >= AAC_CMD_OPEN && command <= AAC_CMD_STATS) ||
+        (command >= MP3_CMD_OPEN && command <= MP3_CMD_STREAM_OPEN))
         return aac_stream_command(command, args, BOX + EXT_REPLY);
     switch (command) {
     case EXT_CMD_PING:
@@ -120,4 +123,6 @@ void mailbox_poll(void)
         return;
     BOX[EXT_STATUS] = handle(BOX[EXT_COMMAND], BOX + EXT_ARGS);
     BOX[EXT_ACK] = sequence;
+    void codec_notify(void);
+    codec_notify();
 }

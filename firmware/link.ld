@@ -9,12 +9,17 @@ SECTIONS
     . = 0x0;
     .text : { KEEP(*(.text.start)) *(.text*) } :prog
 
+    /* MP3 ABI 2 metadata: after extension mailbox, before task registers. */
+    .codec_meta 0x10001A80 (NOLOAD) : { . += 0x480; } :NONE
+    ASSERT(ADDR(.codec_meta)+SIZEOF(.codec_meta)==0x10001F00,"Codec metadata overlaps task registers")
+
     /* words 0x0000 stack, 0x0800 pipes, 0x1000 globals */
     . = 0x10000000 + 0x1000 * 2;
     .rodata : ALIGN(4) { *(.rodata*) } :data
     .data   : ALIGN(4) { *(.data*) } :data
     .bss    : ALIGN(4) { *(.bss* COMMON) } :data
     ASSERT(. <= 0x10000000 + 0x7000 * 2, "X memory overflow: output buffers at 0x7000")
+    ASSERT((d_spec & 3) == 0, "Compressed-codec spectral overlay alignment")
 
     /* Y memory from word 0xC000 */
     . = 0x10000000 + 0xC000 * 2;
@@ -33,6 +38,7 @@ SECTIONS
     .aac_tables 0x10038000 : { *(.aac_tables) } :aactables
     ASSERT(SIZEOF(.aac_tables) == 22716, "AAC table ABI changed")
     .aac_time (NOLOAD) : ALIGN(2) { *(.aac_time) } :NONE
+    ASSERT((ADDR(.aac_time) & 3) == 0, "Compressed-codec state alignment")
     .aac_types (NOLOAD) : ALIGN(2) { *(.aac_types) } :NONE
     ASSERT(. <= 0x10040000, "AAC bank1 overflow")
     ASSERT(SIZEOF(.text) <= 0x40000, "Program RAM overflow")

@@ -151,7 +151,19 @@ static void aac_close(audio_codec *c)
         c->data = NULL;
     }
 }
-static const audio_codec_ops aac_ops = {aac_read, aac_seek, aac_close};
+static Result aac_stats(audio_codec *c, opendspAudioDecoderStats *stats)
+{
+    aac_data *a = c->data;
+    opendspAacStats common = {.struct_size = sizeof(common)};
+    Result r = opendspAacGetStats(a->decoder, &common);
+    if (R_FAILED(r))
+        return r;
+    memset(stats, 0, sizeof(*stats));
+    memcpy(stats, &common, sizeof(common));
+    stats->struct_size = sizeof(*stats);
+    return 0;
+}
+static const audio_codec_ops aac_ops = {aac_read, aac_seek, aac_close, aac_stats};
 
 static Result aac_allocate(audio_codec *c, u32 backend)
 {

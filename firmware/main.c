@@ -70,9 +70,23 @@ static int pipe_get(u16 slot, u16 *value)
 // slot notifications on REPLY2, one at a time
 #define NOTIFY_QUEUE 8
 static u16 notify_queue[NOTIFY_QUEUE], notify_head, notify_count;
+static u16 codec_notify_pending;
 
 static void notify_poll(void)
 {
+    if (codec_notify_pending) {
+        u16 i;
+        for (i = 0; i < notify_count; ++i)
+            if (notify_queue[(notify_head + i) & (NOTIFY_QUEUE - 1)] == 8)
+                break;
+        if (i < notify_count)
+            codec_notify_pending = 0;
+        else if (notify_count < NOTIFY_QUEUE) {
+            notify_queue[(notify_head + notify_count) & (NOTIFY_QUEUE - 1)] = 8;
+            ++notify_count;
+            codec_notify_pending = 0;
+        }
+    }
     if (notify_count && !(apbp_status() & APBP_STAT_REPLY_FULL(2))) {
         apbp_reply(2, notify_queue[notify_head]);
         apbp_raise(0x8000);
@@ -84,7 +98,7 @@ static void notify_poll(void)
 static void notify(u16 slot)
 {
     u16 i;
-    if (slot == SLOT_AUDIO_OUT) // frame notifications coalesce
+    if (slot == SLOT_AUDIO_OUT || slot == 8) // frame/codec notifications coalesce
         for (i = 0; i < notify_count; i++)
             if (notify_queue[(notify_head + i) & (NOTIFY_QUEUE - 1)] == slot)
                 return;
@@ -93,6 +107,13 @@ static void notify(u16 slot)
     notify_queue[(notify_head + notify_count) & (NOTIFY_QUEUE - 1)] = slot;
     notify_count++;
     notify_poll();
+}
+
+/* Pipe 4 is independent of libctru's audio and legacy binary pipes. Only an
+ * event is needed: coherent progress/results live in the validated arena. */
+void codec_notify(void)
+{
+    codec_notify_pending = 1;
 }
 
 // REPLY0 = 1 answers shutdown and sleep
@@ -275,6 +296,10 @@ static void ipc_poll(void)
     }
     if (sem & 0x2000)
         apbp_clear(0x2000);
+    if (sem & 0x1000) {
+        apbp_clear(0x1000);
+        aac_stream_kick();
+    }
     answer_init_if_ready();
     notify_poll();
     reply0_poll();
@@ -321,6 +346,7 @@ static void render_frame(void)
     }
     select_bank(0);
     notify(SLOT_AUDIO_OUT);
+    aac_stream_frame();
 }
 
 int main(void)

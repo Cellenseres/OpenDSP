@@ -1,4 +1,6 @@
 * text=auto eol=lf
 *.png binary
 *.wav binary
+*.mp3 binary
 *.cdc binary
+firmware/mp3/LICENSE.minimp3 whitespace=-blank-at-eof

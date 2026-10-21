@@ -38,3 +38,6 @@ The linker checks memory bounds. Transport definitions are in `firmware/aac_prot
 
 `opendspAacGetStats()` reports decode time, scheduling latency, yields and stack use.
 Sound Lab's DSP meter includes the mixer, effects and AAC.
+
+AAC and MP3 share the DSP decoder. An explicit DSP Open returns BUSY while
+the other codec owns it; AAC AUTO may select ARM11.
