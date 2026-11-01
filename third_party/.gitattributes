@@ -1,0 +1,2 @@
+# Preserve vendored bytes so SHA256SUMS verifies identically on every platform.
+* -text
