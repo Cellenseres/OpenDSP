@@ -149,14 +149,15 @@ static void adpcm_decode(voice_t *v, u16 n, s16 *dst)
     v->adpcm_nibble = nib;
 }
 
-// lowest buffer id plays next; looping buffers requeue
+// earliest buffer id plays next; looping buffers requeue.
+// ids wrap (libctru counts 1..65535, then 1 again): compared as a distance
 static int dequeue(voice_t *v)
 {
     u16 i, best = 0;
     if (!v->queued)
         return 0;
     for (i = 1; i < v->queued; i++)
-        if (v->queue[i].id < v->queue[best].id)
+        if ((s16)(v->queue[i].id - v->queue[best].id) < 0)
             best = i;
     v->current = v->queue[best];
     for (i = best; i + 1 < v->queued; i++)
