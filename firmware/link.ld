@@ -16,6 +16,14 @@ SECTIONS
     /* words 0x0000 stack, 0x0800 pipes, 0x1000 globals */
     . = 0x10000000 + 0x1000 * 2;
     .rodata : ALIGN(4) { *(.rodata*) } :data
+    .sleep_data : ALIGN(4) {
+        __sleep_start = .;
+        mixer.o(.data .bss COMMON) reverb.o(.data .bss COMMON) surround.o(.data .bss COMMON)
+        aac/*.o(.data .bss COMMON) mp3/*.o(.data .bss COMMON)
+        . = ALIGN(4);
+        __sleep_end = .;
+    } :data
+    ASSERT(SIZEOF(.sleep_data) + 0x2C0 * 2 + 0x580 * 2 + 0x18000 <= 0x24000, "Sleep RAM overflow")
     .data   : ALIGN(4) { *(.data*) } :data
     .bss    : ALIGN(4) { *(.bss* COMMON) } :data
     ASSERT(. <= 0x10000000 + 0x7000 * 2, "X memory overflow: output buffers at 0x7000")

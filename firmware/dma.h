@@ -6,5 +6,6 @@ u16 dma_error(void);
 
 void dma_read(u32 address, u16 words, u16 dst);
 void dma_write(u16 src, u16 words, u32 address);
+void dma_save(u16 src, u16 words, u32 address);
 void dma_quiesce(void);
 const u16 *dma_fetch_words(u32 address, u16 words);

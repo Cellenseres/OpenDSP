@@ -2,6 +2,7 @@
 #pragma once
 #include "hw.h"
 void aac_stream_init(void);
+void aac_stream_resume(void);
 void aac_stream_poll(void);
 void aac_stream_kick(void);
 void aac_stream_played(u32 address);

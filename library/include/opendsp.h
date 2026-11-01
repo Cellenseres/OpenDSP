@@ -25,6 +25,7 @@ extern "C" {
 #define OPENDSP_CAP_FIRMWARE (1u << 0) // OpenDSP firmware is running
 #define OPENDSP_CAP_DELAY (1u << 1)
 #define OPENDSP_CAP_REVERB (1u << 2)
+#define OPENDSP_CAP_SLEEP (1u << 3)
 #define OPENDSP_CAP_AAC_ARM11 (1u << 16) // AAC decoder in this library
 #define OPENDSP_CAP_MP3_ARM11 (1u << 17) // Explicit ARM11 MP3 decoder in this library
 #define OPENDSP_CAP_AAC_DSP (1u << 4)

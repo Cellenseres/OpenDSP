@@ -7,6 +7,8 @@
 #include "dma.h"
 #include "mailbox.h"
 #include "stats.h"
+#include "sleep.h"
+#include "extension.h"
 #include "aac/stream.h"
 
 #define PIPE_TABLE 0x0800
@@ -173,6 +175,7 @@ static void clear_bank(u16 bank)
 enum { STATE_OFF, STATE_ON, STATE_SLEEP };
 static u16 state;
 static u16 frames;
+static u16 resume_pending;
 
 // init answer waits for ARM semaphore 0x4000
 #define INIT_WAIT_PASSES 40000u
@@ -203,6 +206,7 @@ static void handle_audio_command(void)
         pipe_get(SLOT_AUDIO_IN, &pad);
         switch (cmd & 0xFF) {
         case 0: // initialize
+            resume_pending = 0;
             aac_stream_init();
             clear_bank(0);
             clear_bank(1);
@@ -222,14 +226,34 @@ static void handle_audio_command(void)
             break;
         case 2: // wake up
             aac_stream_init();
+            sources_init();
+            ((vu16 *)EXT_BASE)[SLEEP_CORE_RESTORED] = sources_restore();
+            if (((vu16 *)EXT_BASE)[SLEEP_CORE_RESTORED]) {
+                u16 restored = sleep_restore();
+                ((vu16 *)EXT_BASE)[SLEEP_RESTORED] = restored;
+                if (restored) aac_stream_resume();
+            }
+            clear_bank(0);
+            clear_bank(1);
+            frames = 4;
+            resume_pending = 1;
             if (!output_running)
                 output_start();
+            state = STATE_OFF;
             start_init();
             break;
         case 3: // sleep
-            aac_stream_init();
             state = STATE_SLEEP;
             init_pending = 0;
+            output_stop();
+            dma_quiesce();
+            sources_save();
+            sleep_save();
+            select_bank(0);
+            *(vu16 *)SHM_FRAME_COUNTER = 0;
+            select_bank(1);
+            *(vu16 *)SHM_FRAME_COUNTER = 0;
+            select_bank(0);
             wake_arm = 1; // releases ndsp's waiting thread
             reply0_pending = 1;
             break;
@@ -335,6 +359,14 @@ static void render_frame(void)
             out[i] = 0;
         return;
     }
+    if (resume_pending) {
+        if (!frame_counter(1)) {
+            for (i = 0; i < 2 * FRAME_SAMPLES; i++) out[i] = 0;
+            notify(SLOT_AUDIO_OUT);
+            return;
+        }
+        resume_pending = 0;
+    }
     bank = read_bank();
     sources_render(bank, bank ^ 1, out);
     select_bank(bank ^ 1);
@@ -361,7 +393,7 @@ int main(void)
     output_start();
     for (;;) {
         ipc_poll();
-        mailbox_poll();
+        if (state != STATE_SLEEP) mailbox_poll();
         output_poll();
         if (frames_due) {
             irq_disable();
@@ -370,7 +402,7 @@ int main(void)
             stats_frame_begin(frames_due);
             render_frame();
             stats_frame_end();
-        } else
+        } else if (state == STATE_ON && !resume_pending)
             aac_stream_poll();
     }
 }

@@ -28,7 +28,10 @@ extern const u16 opendsp_aac_tables[AAC_TABLE_WORDS];
 extern const u16 opendsp_mp3_tables[MP3_TABLE_WORDS];
 static LightLock owner_lock;
 static bool setup, sleeping;
-static volatile u32 epoch;
+static u32 frame_requests;
+static u32 epoch;
+static bool sleeping_now(void) { return __atomic_load_n(&sleeping, __ATOMIC_SEQ_CST); }
+static u32 power_epoch(void) { return __atomic_load_n(&epoch, __ATOMIC_ACQUIRE); }
 static u32 dsp_generation;
 static u32 current_generation(void)
 {
@@ -59,14 +62,23 @@ static u16 codec_command(const aac_dsp_backend *d, u16 command)
 static void power_hook(DSP_HookType type)
 {
     if (type == DSPHOOK_ONSLEEP || type == DSPHOOK_ONCANCEL) {
-        sleeping = true;
-        epoch++;
+        __atomic_store_n(&sleeping, true, __ATOMIC_SEQ_CST);
+        if (type == DSPHOOK_ONCANCEL || !opendsp_sleep_preserves_context())
+            __atomic_add_fetch(&epoch, 1, __ATOMIC_RELEASE);
+        while (__atomic_load_n(&frame_requests, __ATOMIC_SEQ_CST)) svcSleepThread(500000);
     }
     if (type == DSPHOOK_ONWAKEUP) {
-        sleeping = false;
-        epoch++;
+        if (!opendsp_sleep_preserves_context()) opendsp_aac_wakeup(false);
+    }
+}
+
+void opendsp_aac_wakeup(bool restored)
+{
+    if (!restored) {
+        __atomic_add_fetch(&epoch, 1, __ATOMIC_RELEASE);
         __atomic_add_fetch(&dsp_generation, 1, __ATOMIC_RELEASE);
     }
+    __atomic_store_n(&sleeping, false, __ATOMIC_RELEASE);
 }
 
 void opendsp_aac_setup(void)
@@ -78,6 +90,12 @@ void opendsp_aac_setup(void)
     }
 }
 
+void opendsp_aac_power_order(void)
+{
+    dspUnhook(&hook);
+    dspHook(&hook, power_hook);
+}
+
 void opendsp_aac_release(void)
 {
     if (!setup)
@@ -85,14 +103,14 @@ void opendsp_aac_release(void)
     LightLock_Lock(&owner_lock);
     if (owner) {
         owner->connected = false;
-        owner->epoch = epoch - 1;
+        owner->epoch = power_epoch() - 1;
     }
     if (quarantined && !dspIsComponentLoaded()) {
         linearFree(quarantined);
         quarantined = NULL;
     }
-    epoch++;
-    sleeping = false;
+    __atomic_add_fetch(&epoch, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&sleeping, false, __ATOMIC_RELEASE);
     LightLock_Unlock(&owner_lock);
 }
 
@@ -122,7 +140,7 @@ static Result connect_stream(aac_dsp_backend *d)
     Result rc;
     unsigned words = d->codec ? MP3_TABLE_WORDS : AAC_TABLE_WORDS;
     const u16 *tables = d->codec ? opendsp_mp3_tables : opendsp_aac_tables;
-    if (!opendsp_running || sleeping)
+    if (!opendsp_running || sleeping_now())
         return OPENDSP_AAC_ERR_BACKEND;
     if (R_FAILED(opendspGetCapabilities(&caps)) || !(caps & (d->codec ? MP3_CAP_DSP : AAC_CAP_DSP)))
         return OPENDSP_AAC_ERR_BACKEND;
@@ -179,7 +197,7 @@ static Result connect_stream(aac_dsp_backend *d)
     /* Acquire the codec lease before writing its shared tables. */
     memcpy((void *)address, tables, words * 2);
     __dsb();
-    d->epoch = epoch;
+    d->epoch = power_epoch();
     d->generation = current_generation();
     d->stopped = false;
     d->faulted = false;
@@ -218,7 +236,7 @@ static Result codec_backend_allocate(aac_dsp_backend **out, u16 codec, u16 count
     *out = NULL;
     opendsp_aac_setup();
     LightLock_Lock(&owner_lock);
-    if (quarantined && !sleeping && (!dspIsComponentLoaded() || quarantine_epoch != current_generation())) {
+    if (quarantined && !sleeping_now() && (!dspIsComponentLoaded() || quarantine_epoch != current_generation())) {
         linearFree(quarantined);
         quarantined = NULL;
     }
@@ -280,16 +298,17 @@ static Result decode_status(u16 status)
     }
 }
 
-static Result submit_frame(aac_dsp_backend *d, const u8 *p, unsigned len, u16 **out)
+static Result submit_frame_inner(aac_dsp_backend *d, const u8 *p, unsigned len, u16 **out)
 {
     unsigned slot;
     u16 *control, *result;
     Result rc;
-    if (!opendsp_running || sleeping)
+    if (sleeping_now()) return OPENDSP_AAC_ERR_BUSY;
+    if (!opendsp_running)
         return OPENDSP_AAC_ERR_BACKEND;
     if (d->faulted)
         return OPENDSP_AAC_ERR_TIMEOUT;
-    if (d->epoch != epoch || !d->connected) {
+    if (d->epoch != power_epoch() || !d->connected) {
         rc = connect_stream(d);
         if (R_FAILED(rc))
             return rc;
@@ -311,7 +330,7 @@ static Result submit_frame(aac_dsp_backend *d, const u8 *p, unsigned len, u16 **
         __dsb();
         if (result[0] == (u16)(d->sequence + 1) && result[8] == d->session)
             break;
-        if (d->epoch != epoch || sleeping || !opendsp_running) {
+        if (d->epoch != power_epoch() || !opendsp_running || (sleeping_now() && !opendsp_sleep_preserves_context())) {
             d->connected = false;
             return OPENDSP_AAC_ERR_BACKEND;
         }
@@ -329,6 +348,14 @@ static Result submit_frame(aac_dsp_backend *d, const u8 *p, unsigned len, u16 **
     d->sequence++;
     *out = result;
     return 0;
+}
+
+static Result submit_frame(aac_dsp_backend *d, const u8 *p, unsigned len, u16 **out)
+{
+    __atomic_add_fetch(&frame_requests, 1, __ATOMIC_SEQ_CST);
+    Result r = submit_frame_inner(d, p, len, out);
+    __atomic_sub_fetch(&frame_requests, 1, __ATOMIC_SEQ_CST);
+    return r;
 }
 
 static void read_pcm(aac_dsp_backend *d, unsigned slot, s16 *pcm, unsigned frames, unsigned channels)
@@ -512,7 +539,7 @@ void aac_backend_reset(aac_dsp_backend *d)
     if (!d)
         return;
     d->reset_requested = true;
-    if (!opendsp_running || sleeping || d->epoch != epoch) {
+    if (!opendsp_running || sleeping_now() || d->epoch != power_epoch()) {
         d->connected = false;
         return;
     }
@@ -544,7 +571,8 @@ static Result stream_valid(aac_dsp_backend *d)
 {
     if (!d || d->codec != 2)
         return OPENDSP_MP3_ERR_INVALID_ARG;
-    if (!opendsp_running || sleeping || !d->connected || d->epoch != epoch)
+    if (sleeping_now()) return OPENDSP_MP3_ERR_BUSY;
+    if (!opendsp_running || !d->connected || d->epoch != power_epoch())
         return OPENDSP_MP3_ERR_BACKEND;
     if (d->faulted)
         return OPENDSP_MP3_ERR_TIMEOUT;
@@ -656,12 +684,12 @@ u32 mp3_backend_stream_overhead(void)
 }
 Result mp3_backend_stream_reset(aac_dsp_backend *d, bool preserve_output)
 {
-    if (!d || d->codec != 2 || !opendsp_running || sleeping)
+    if (!d || d->codec != 2 || !opendsp_running || sleeping_now())
         return OPENDSP_MP3_ERR_BACKEND;
     LightLock_Lock(&owner_lock);
     d->preserve_output = preserve_output;
     Result r;
-    if (!d->connected || d->epoch != epoch) {
+    if (!d->connected || d->epoch != power_epoch()) {
         d->reset_requested = true;
         r = connect_stream(d);
     } else {
@@ -677,7 +705,7 @@ void mp3_backend_stream_stop(aac_dsp_backend *d)
         return;
     u16 args[1] = {d->session};
     if (!dspIsComponentLoaded() || d->generation != current_generation() ||
-        (!sleeping && R_SUCCEEDED(opendsp_request(MP3_CMD_CLOSE, args, 1, NULL, 0))))
+        (!sleeping_now() && R_SUCCEEDED(opendsp_request(MP3_CMD_CLOSE, args, 1, NULL, 0))))
         d->stopped = true;
 }
 
@@ -686,9 +714,9 @@ void aac_backend_close(aac_dsp_backend *d)
     if (!d)
         return;
     LightLock_Lock(&owner_lock);
-    bool safe = !dspIsComponentLoaded() || (!sleeping && d->generation != current_generation()) || d->stopped;
+    bool safe = !dspIsComponentLoaded() || (!sleeping_now() && d->generation != current_generation()) || d->stopped;
     u16 args[1] = {d->session};
-    if (!safe && !sleeping)
+    if (!safe && !sleeping_now())
         safe = R_SUCCEEDED(opendsp_request(codec_command(d, AAC_CMD_CLOSE), args, 1, NULL, 0));
     if (safe) {
         linearFree(d->memory);

@@ -4,6 +4,8 @@
 #include "shared_mem.h"
 #include "mixer.h"
 #include "output.h"
+#include "voice_state.h"
+#include "sleep.h"
 
 #define CONFIG_WORDS 96
 #define STATUS_WORDS 6
@@ -49,6 +51,99 @@ static u32 play_position[NUM_SOURCES];
 static s16 voice_out[2 * FRAME_SAMPLES];
 static wavebuf_t new_buffer;
 static u16 gains_stale;
+static u16 saved_voice[SLEEP_SOURCE_WORDS];
+
+static vu16 *snapshot_word(u16 logical)
+{
+    u16 address = SHM_DSP_STATUS + SLEEP_HEADER_WORDS + logical;
+    if (address >= SHM_SOURCE_STATUS) address += NUM_SOURCES * STATUS_WORDS;
+    return (vu16 *)(unsigned)address;
+}
+
+__attribute__((noinline)) static void restore_source_status(u16 i)
+{
+    const vu16 *st = SOURCE_STATUS(i);
+    voice_t *v = &voices[i];
+    sync_count[i] = st[1];
+    v->status_position = ((u32)st[2] << 16) | st[3];
+    v->current_id = st[4];
+    v->last_id = st[5];
+}
+
+__attribute__((noinline)) static void restore_source_filters(u16 i)
+{
+    const u16 *p = saved_voice + VOICE_STATE_WORDS;
+    source_mix_t *m = &mixes[i];
+    u16 ch, k;
+    play_position[i] = (u32)*p++ << 16;
+    play_position[i] |= *p++;
+    for (ch = 0; ch < 2; ++ch) {
+        m->simple_state[ch][1] = (s16)*p++;
+        for (k = 1; k < 5; ++k) m->biquad_state[ch][k] = (s16)*p++;
+    }
+    m->fresh = 1;
+}
+
+__attribute__((noinline)) static void restore_source(u16 i)
+{
+    u16 k;
+    for (k = 0; k < SLEEP_SOURCE_WORDS; ++k)
+        saved_voice[k] = *snapshot_word(i * SLEEP_SOURCE_WORDS + k);
+    voice_restore(&voices[i], saved_voice);
+    restore_source_status(i);
+    restore_source_filters(i);
+}
+
+u16 sources_save(void)
+{
+    u16 i, ch, k, valid = 1, checksum = 0;
+    vu16 *header = SLEEP_HEADER;
+    select_bank(0);
+    for (i = 0; i < SLEEP_WORDS; ++i)
+        if (SHM_DSP_STATUS + i < SHM_SOURCE_STATUS ||
+            SHM_DSP_STATUS + i >= SHM_SOURCE_STATUS + NUM_SOURCES * STATUS_WORDS) header[i] = 0;
+    for (i = 0; i < NUM_SOURCES; ++i) {
+        u16 *p = saved_voice;
+        vu16 *st = SOURCE_STATUS(i);
+        voice_t *v = &voices[i];
+        source_mix_t *m = &mixes[i];
+        for (k = 0; k < SLEEP_SOURCE_WORDS; ++k) p[k] = 0;
+        if (!voice_save(v, p)) valid = 0;
+        p += VOICE_STATE_WORDS;
+        *p++ = (u16)(play_position[i] >> 16);
+        *p++ = (u16)play_position[i];
+        for (ch = 0; ch < 2; ++ch) {
+            *p++ = (u16)m->simple_state[ch][1];
+            for (k = 1; k < 5; ++k) *p++ = (u16)m->biquad_state[ch][k];
+        }
+        for (k = 0; k < SLEEP_SOURCE_WORDS; ++k)
+            *snapshot_word(i * SLEEP_SOURCE_WORDS + k) = saved_voice[k];
+        st[0] = v->enabled | (v->id_changed << 8);
+        st[1] = sync_count[i];
+        st[2] = (u16)(v->status_position >> 16);
+        st[3] = (u16)v->status_position;
+        st[4] = v->current_id;
+        st[5] = v->last_id;
+    }
+    for (i = SLEEP_HEADER_WORDS; i < SLEEP_WORDS; ++i) checksum += header[i];
+    header[2] = valid ? SLEEP_MAGIC : 0;
+    header[3] = SLEEP_VERSION;
+    header[4] = checksum;
+    return valid;
+}
+
+u16 sources_restore(void)
+{
+    u16 i, checksum = 0;
+    const vu16 *header = SLEEP_HEADER;
+    select_bank(0);
+    if (header[2] != SLEEP_MAGIC || header[3] != SLEEP_VERSION) return 0;
+    for (i = SLEEP_HEADER_WORDS; i < SLEEP_WORDS; ++i) checksum += header[i];
+    if (checksum != header[4]) return 0;
+    for (i = 0; i < NUM_SOURCES; ++i) restore_source(i);
+    gains_stale = 1;
+    return 1;
+}
 
 s32 float_to_fixed(u16 lo, u16 hi, u16 frac_bits)
 {
@@ -287,7 +382,7 @@ static void parse_source(u16 i)
     if (hi & DIRTY_ENABLE) {
         u16 on = c[80] & 0xFF;
         if (on && !v->enabled) {
-            v->primed = 0;
+            if (!v->has_current && !v->head_valid) v->primed = 0;
             m->fresh = 1;
         }
         v->enabled = on;

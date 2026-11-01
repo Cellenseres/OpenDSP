@@ -134,6 +134,12 @@ void aac_stream_init(void)
         dma_quiesce();
 }
 
+void aac_stream_resume(void)
+{
+    if (!active) TASK_SP = 0;
+    last_frame = aac_timer_now();
+}
+
 static void restart(u16 counters, u16 preserve_playback)
 {
     u16 i;
