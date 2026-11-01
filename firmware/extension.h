@@ -32,6 +32,7 @@
 #define EXT_CAP_MAILBOX  (1u << 0)
 #define EXT_CAP_DELAY    (1u << 1)
 #define EXT_CAP_REVERB   (1u << 2)
+#define EXT_CAP_SLEEP    (1u << 3)
 
 enum {
     EXT_CMD_PING = 0,
@@ -40,6 +41,7 @@ enum {
     EXT_CMD_STATS = 3,          // reset peaks; reply: frames hi, lo, late, max backlog,
                                 // fifo empty, render hi, lo, render max hi, lo, period hi, lo,
                                 // period min hi, lo, period max hi, lo
+    EXT_CMD_SLEEP_SET = 4,
     EXT_CMD_COUNT
 };
 

@@ -13,3 +13,6 @@ Result opendsp_request(u16 command, const u16 *args, u16 arg_count, u16 *reply, 
 void opendsp_effects_release(void);
 void opendsp_aac_setup(void);
 void opendsp_aac_release(void);
+bool opendsp_sleep_preserves_context(void);
+void opendsp_aac_wakeup(bool restored);
+void opendsp_aac_power_order(void);

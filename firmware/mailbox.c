@@ -9,11 +9,12 @@
 #include "aac/stream.h"
 #include "aac_protocol.h"
 #include "mp3_protocol.h"
+#include "sleep.h"
 
 #define BOX ((vu16 *)EXT_BASE)
 #define FIRMWARE_VERSION 0x0102
 #define CAPABILITIES                                                                                         \
-    (EXT_CAP_MAILBOX | EXT_CAP_DELAY | EXT_CAP_REVERB | AAC_CAP_DSP | MP3_CAP_DSP | MP3_CAP_STREAM)
+    (EXT_CAP_MAILBOX | EXT_CAP_DELAY | EXT_CAP_REVERB | EXT_CAP_SLEEP | AAC_CAP_DSP | MP3_CAP_DSP | MP3_CAP_STREAM)
 
 void mailbox_init(void)
 {
@@ -112,6 +113,8 @@ static u16 handle(u16 command, vu16 *args)
         return set_reverb(args);
     case EXT_CMD_STATS:
         return read_stats(args);
+    case EXT_CMD_SLEEP_SET:
+        return sleep_configure(args);
     }
     return EXT_ERR_COMMAND;
 }

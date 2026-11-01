@@ -4,6 +4,7 @@
 #include <string.h>
 #include "output.h"
 #include "../internal.h"
+#include "../codec_events.h"
 
 struct opendspAudioStream {
     LightLock lock;
@@ -74,11 +75,31 @@ void opendsp_audio_codec_notify(void)
 
 static void dsp_event(DSP_HookType type)
 {
-    if (type != DSPHOOK_ONWAKEUP)
+    if (type == DSPHOOK_ONSLEEP) {
         set_flag(&sleeping, true);
-    __atomic_add_fetch(&epoch, 1, __ATOMIC_RELEASE);
-    if (type == DSPHOOK_ONWAKEUP)
-        set_flag(&sleeping, false);
+        for (;;) {
+            unsigned active = 0;
+            LightLock_Lock(&registry_lock);
+            for (unsigned i = 0; i < 24; ++i) if (streams[i]) active += streams[i]->refs;
+            LightLock_Unlock(&registry_lock);
+            if (!active) break;
+            svcSleepThread(500000);
+        }
+    }
+    if (type == DSPHOOK_ONCANCEL) {
+        set_flag(&sleeping, true);
+        __atomic_add_fetch(&epoch, 1, __ATOMIC_RELEASE);
+    }
+}
+
+void opendsp_audio_wakeup(bool restored)
+{
+    if (!restored) __atomic_add_fetch(&epoch, 1, __ATOMIC_RELEASE);
+    LightLock_Lock(&registry_lock);
+    for (unsigned i = 0; i < 24; ++i)
+        if (streams[i] && streams[i]->codec.direct_pcm) opendsp_audio_mp3_touch(&streams[i]->codec);
+    LightLock_Unlock(&registry_lock);
+    set_flag(&sleeping, false);
     if (flag(&events_ready) && flag(&running))
         for (unsigned i = 0; i < 2; ++i)
             if (__atomic_load_n(&worker_channels[i], __ATOMIC_ACQUIRE))
@@ -146,6 +167,7 @@ static void fail(opendspAudioStream *s, Result r, u32 generation)
 static bool step(opendspAudioStream *s)
 {
     audio_output *o = &s->output;
+    if (flag(&sleeping)) return false;
     u32 e = current_epoch();
     if (e != s->epoch) {
         s->epoch = e;
@@ -327,7 +349,7 @@ static void worker_main(void *arg)
             candidates &= ~(1u << i);
             LightLock_Lock(&registry_lock);
             opendspAudioStream *s = streams[i];
-            if (s && !s->closing && s->group == w->group)
+            if (s && !flag(&sleeping) && !s->closing && s->group == w->group)
                 ++s->refs;
             else
                 s = NULL;
@@ -357,7 +379,8 @@ static void worker_main(void *arg)
         if (!flag(&running))
             break;
         if (!progress) {
-            if (active && frame_events)
+            // Poll when codec IRQs are unavailable.
+            if (active && (frame_events || !opendsp_codec_events_active()))
                 LightEvent_WaitTimeout(&w->event, 5000000);
             else if (active)
                 LightEvent_WaitTimeout(&w->event, 1000000000);

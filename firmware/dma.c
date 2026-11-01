@@ -174,6 +174,18 @@ const u16 *dma_fetch_words(u32 address, u16 words)
     return fetch_blocks(address, (u16)(words << 1));
 }
 
+void dma_save(u16 src, u16 words, u32 address)
+{
+    while (words) {
+        u16 n = words > CHUNK_BYTES / 2 ? (u16)(CHUNK_BYTES / 2) : words;
+        copy_words((const u16 *)(unsigned)src, (s16 *)staging, n);
+        dma_write((u16)(unsigned)staging, n, address);
+        src += n;
+        words -= n;
+        address += (u32)n << 1;
+    }
+}
+
 void fetch_samples(const fetch_job_t *job)
 {
     u16 count = job->stereo ? (u16)(job->count << 1) : job->count;
