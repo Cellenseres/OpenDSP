@@ -28,13 +28,17 @@ jobs:
         id: cache
         uses: actions/cache@v4
         with:
-          path: toolchain/teak-llvm/build/bin
-          key: teak-llvm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('toolchain/build_teak_llvm.sh', 'toolchain/patches/*') }}
+          path: |
+            toolchain/teak-llvm/build/bin
+            toolchain/teak-llvm/build/lib/clang
+            toolchain/teak-llvm/build/lib/teak
+          key: teak-llvm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('toolchain/build_teak_llvm.sh') }}
       - name: Build teak-llvm
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           toolchain/build_teak_llvm.sh
-          find toolchain/teak-llvm/build -mindepth 1 -maxdepth 1 ! -name bin -exec rm -rf {} +
+          find toolchain/teak-llvm/build -mindepth 1 -maxdepth 1 ! -name bin ! -name lib -exec rm -rf {} +
+          find toolchain/teak-llvm/build/lib -mindepth 1 -maxdepth 1 ! -name clang ! -name teak -exec rm -rf {} +
       - name: Firmware
         run: |
           cp firmware/opendsp.cdc /tmp/prebuilt.cdc

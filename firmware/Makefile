@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: BSD-2-Clause
-# Builds opendsp.cdc with the patched teak-llvm (see docs/BUILDING.md).
+# Builds opendsp.cdc with the pinned OpenDSP teak-llvm fork (see docs/BUILDING.md).
 
 TEAK_LLVM ?= ../toolchain/teak-llvm/build
 .DEFAULT_GOAL := all
 CC     := $(TEAK_LLVM)/bin/clang
 LD     := $(TEAK_LLVM)/bin/ld.lld
 PYTHON ?= python3
+TEAK_RUNTIME ?= $(wildcard $(TEAK_LLVM)/lib/teak/libteak_rt.a)
 
 CFLAGS := --target=teak -march=teak -O2 -ffreestanding -fno-builtin -nostdlib \
           -integrated-as -Wall -Wno-int-to-pointer-cast -I. -Iaac
 ASFLAGS := --target=teak -march=teak -integrated-as
 
-OBJECTS := crt0.o main.o sleep.o output.o dma.o voice.o voice_state.o source.o mixer.o reverb.o reverb_kernels.o surround.o mailbox.o stats.o math.o kernels.o
+OBJECTS := crt0.o indirect.o main.o sleep.o output.o dma.o voice.o voice_state.o source.o mixer.o reverb.o reverb_kernels.o surround.o mailbox.o stats.o math.o kernels.o
 OBJECTS += aac/aac_parse.o aac/aac_stages.o aac/aac_dequant.o aac/aac_tns.o \
            aac/aac_fb.o aac/aac_tables_dsp.o aac/aac_fft.o aac/aac_window.o \
            aac/aac_window_pcm.o aac/aac_bits.o aac/aac_arith.o aac/stream.o aac/task.o
@@ -43,8 +44,8 @@ polyphase_table.h: ../tools/gen_polyphase.py
 %.o: %.s
 	$(CC) $(ASFLAGS) -c $< -o $@
 
-opendsp.elf: $(OBJECTS) link.ld
-	$(LD) -T link.ld -Map=opendsp.map $(OBJECTS) -o $@
+opendsp.elf: $(OBJECTS) $(TEAK_RUNTIME) link.ld
+	$(LD) -T link.ld -Map=opendsp.map $(OBJECTS) $(TEAK_RUNTIME) -o $@
 
 aac_tables.bin: opendsp.elf ../tools/aac_blob.py
 	$(PYTHON) ../tools/aac_blob.py $< $@

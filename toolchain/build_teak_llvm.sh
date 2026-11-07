@@ -1,36 +1,20 @@
 #!/bin/sh
 # SPDX-License-Identifier: BSD-2-Clause
-# Builds teak-llvm with the OpenDSP patches into toolchain/teak-llvm/build.
+# Build the pinned Teak compiler.
 # Needs git, cmake, ninja, python3, clang.
 set -e
-COMMIT=bda74e1c0e3e6f04ae08fc5356fb4208aebb0f9e
+REPOSITORY=https://github.com/Cellenseres/teak-llvm.git
+COMMIT=20941665daada9de2f5a3ba8f62ee71390b198e3
 HERE=$(cd "$(dirname "$0")" && pwd)
 cd "$HERE"
 
 if [ ! -d teak-llvm ]; then
-    git clone --filter=blob:none https://github.com/Gericom/teak-llvm.git
+    git clone --filter=blob:none --no-checkout "$REPOSITORY"
+elif ! git -C teak-llvm diff --quiet || ! git -C teak-llvm diff --cached --quiet; then
+    echo "Compiler checkout has local changes. Preserve them and use a fresh checkout." >&2
+    exit 1
 fi
 cd teak-llvm
-git checkout -q "$COMMIT"
-# This upstream file has CRLF line endings.
-sed -i 's/\r$//' llvm/lib/Target/Teak/TeakAsmPrinter.cpp
-for p in "$HERE"/patches/*.patch; do
-    if git apply --check "$p" 2>/dev/null; then
-        git apply "$p"
-    elif ! git apply --reverse --check "$p" 2>/dev/null; then
-        echo "Cannot apply required patch: $p" >&2
-        exit 1
-    fi
-    git apply --reverse --check "$p"
-done
-
-mkdir -p build
-cd build
-cmake -G Ninja ../llvm -DCMAKE_BUILD_TYPE=Release \
-    -DLLVM_TARGETS_TO_BUILD="" -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=Teak \
-    -DLLVM_ENABLE_PROJECTS="clang;lld" \
-    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-    -DCMAKE_CXX_FLAGS="-include cstdint -include limits -Wno-everything" \
-    -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF \
-    -DLLVM_PARALLEL_LINK_JOBS=2
-ninja clang lld llvm-readelf
+git fetch --depth=1 "$REPOSITORY" "$COMMIT"
+git checkout --detach -q "$COMMIT"
+sh opendsp/build.sh
