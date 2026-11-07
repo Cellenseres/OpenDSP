@@ -603,6 +603,56 @@ bus_normalize:
     pop     r0
     ret     always
 
+// void bus_return_front_chunk(const u16 *job): bus_return_chunk, rear known zero
+.global bus_return_front_chunk
+bus_return_front_chunk:
+    push    r0
+    push    r1
+    push    r4
+    push    y0
+    mov     a0l, r4
+    mov     [r4++], r0
+    mov     [r4++], r1
+    modr    [r4++]
+    modr    [r4++]
+    mov     [r4++], a1
+    mov     [r4], y0                // volume
+    mov     a1l, r4                 // main, interleaved L R
+    mov     0x27, a1                // 40 samples per call
+    dint
+    bkrep   a1l, .Lbf_end
+    mov     [r0++], a0h             // left = front L
+    addl    [r0++], a0
+    shfi    a0, a0, +16
+    lim     a0, a0
+    mpy     y0, a0h, a1
+    mov     [r4++], a0h
+    addl    [r4--], a0
+    add     p*, a0
+    mov     a0h, [r4++]
+    mov     a0l, [r4++]
+    mov     [r1++], a0h             // right = front R
+    addl    [r1++], a0
+    shfi    a0, a0, +16
+    lim     a0, a0
+    mpy     y0, a0h, a1
+    mov     [r4++], a0h
+    addl    [r4--], a0
+    add     p*, a0
+    mov     a0h, [r4++]
+    mov     a0l, [r4++]
+    modr    [r0++]
+    modr    [r0++]
+    modr    [r1++]
+    modr    [r1++]
+.Lbf_end:
+    eint
+    pop     y0
+    pop     r4
+    pop     r1
+    pop     r0
+    ret     always
+
 // void bus_return_chunk(const u16 *job): front L, front R, rear L, rear R, main, volume
 // main += sat16(front + rear) * volume, both channels, 40 samples
 .global bus_return_chunk

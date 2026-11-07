@@ -39,7 +39,7 @@ typedef enum { OPENDSP_AUDIO_WAV, OPENDSP_AUDIO_AAC, OPENDSP_AUDIO_MP3 } opendsp
 typedef struct {
     u32 struct_size;
     s32 channel;
-    u32 buffer_count;  // 0 = 4; otherwise 2..8 (MP3: 3..8)
+    u32 buffer_count;  // 0 = 4 (DSP MP3: 8); otherwise 2..8 (MP3: 3..8)
     u32 buffer_frames; // 0 = WAV 2048 / AAC 1024 / MP3 1152; otherwise 256..16384
     u32 aac_backend;   // AAC/MP3 backend; MP3 AUTO requires DSP, ARM11 is explicit
     u32 flags;

@@ -19,6 +19,9 @@ OBJECTS += aac/aac_parse.o aac/aac_stages.o aac/aac_dequant.o aac/aac_tns.o \
 OBJECTS += mp3/decoder.o mp3/product.o mp3/transforms.o mp3/window.o mp3/synth.o mp3/requant.o mp3/normalize.o mp3/bits.o mp3/huffman.o mp3/schedule.o
 HEADERS := $(wildcard *.h aac/*.h mp3/*.h)
 mp3/decoder.o aac/stream.o: CFLAGS += -fno-strict-aliasing
+# 32-bit code needs no 40-bit spills
+SPILL32 := mp3/decoder.o mixer.o reverb.o voice.o source.o surround.o stats.o output.o
+$(SPILL32): CFLAGS += -mllvm -teak-spill40=false
 
 mp3/decoder.o: mp3/decoder.c mp3/math.inc mp3/hybrid.inc $(HEADERS) ../tools/check_mp3_codegen.py
 	$(CC) $(CFLAGS) -S $< -o mp3/decoder.check.s

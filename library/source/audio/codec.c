@@ -25,7 +25,7 @@ Result opendsp_audio_codec_open(audio_codec *c, const char *path, u32 backend, u
     else if (got >= 7 && h[0] == 0xff && (h[1] & 0xf6) == 0xf0)
         r = opendsp_audio_aac_open(c, backend);
     else if ((got >= 3 && !memcmp(h, "ID3", 3)) || (got >= 4 && h[0] == 255 && (h[1] & 0xe6) == 0xe2))
-        r = opendsp_audio_mp3_open(c, backend, count, frames ? frames : 1152, flags);
+        r = opendsp_audio_mp3_open(c, backend, count ? count : AUDIO_MP3_DSP_BUFFERS, frames ? frames : 1152, flags);
     else
         r = OPENDSP_AUDIO_ERR_FORMAT;
     if (R_SUCCEEDED(r))

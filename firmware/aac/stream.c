@@ -88,6 +88,9 @@ static __attribute__((noinline)) void mp3_codec_yield_slow(void)
 u16 mp3_slice_ready(const u32 *deadline, const volatile u16 *due);
 void mp3_codec_yield(void)
 {
+    // keep the FIFO full between yields
+    if (!(BTDMP0_TX_STAT & BTDMP_TX_FULL))
+        output_poll();
     if (mp3_yield_fast && mp3_slice_ready(&mp3_yield_deadline, &frames_due))
         return;
     mp3_codec_yield_slow();
@@ -398,6 +401,12 @@ void aac_task_main(void)
     }
 }
 
+// MP3 streams keep 1/16 spare, AAC 1/8
+static u32 codec_budget(u32 period)
+{
+    return period - (stream_mode ? period >> 4 : period >> 3);
+}
+
 void aac_stream_poll(void)
 {
     u32 start, spent;
@@ -406,8 +415,7 @@ void aac_stream_poll(void)
         return;
     if (stream_mode && stream_waiting)
         return;
-    if (stats.period_last &&
-        stats.render_raw_last + stats_aac_used() >= stats.period_last - (stats.period_last >> 3))
+    if (stats.period_last && stats.render_raw_last + stats_aac_used() >= codec_budget(stats.period_last))
         return;
     if (!active) {
         if (stream_mode) {
@@ -467,7 +475,7 @@ void aac_stream_poll(void)
     mp3_yield_fast = codec && stream_mode && !stream_profile;
     if (mp3_yield_fast) {
         u32 period = stats.period_last ? stats.period_last : 655360UL;
-        u32 left = period - (period >> 3) - stats.render_raw_last - stats_aac_used();
+        u32 left = codec_budget(period) - stats.render_raw_last - stats_aac_used();
         u32 quantum = period >> 3;
         if (left < quantum)
             quantum = left;

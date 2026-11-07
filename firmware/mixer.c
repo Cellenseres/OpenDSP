@@ -17,6 +17,7 @@ static u16 bus_used[NUM_BUSES];
 static s16 volume[3] = {0x4000, 0, 0}; // master, aux 0, aux 1 (Q14)
 static u16 aux_enabled[2], aux_bypass[2], output_format = 1, clip_mode = 1;
 static u16 rear_mode; // 0 fold, 1 rear ratio, 2 surround
+static u16 rear_dirty[2]; // aux rear bus may be nonzero
 // gains are read as the Y operand: Y memory
 static mix_job_t mix_job YMEM_BSS;
 static mix_ramp_job_t ramp_job;
@@ -82,6 +83,7 @@ void mixer_init(void)
     output_format = 1;
     rear_mode = 0;
     clip_mode = 1;
+    rear_dirty[0] = rear_dirty[1] = 1;
 }
 
 // bit 0: front kept separate, bit 1: rear
@@ -232,9 +234,16 @@ void mixer_begin(void)
         bus_used[b] = (mixer_route((b + 1) >> 1) >> ((b + 1) & 1)) & 1;
     bus_used[BUS_MAIN_REAR] = rear_mode != 0;
     bus_used[BUS_POST] = rear_mode == 2;
-    for (b = 0; b < NUM_BUSES; b++)
-        if (bus_used[b])
-            clear_words(bus[b], 4 * F);
+    for (b = 0; b < NUM_BUSES; b++) {
+        if (!bus_used[b])
+            continue;
+        if (b == 2 || b == 4) { // clean aux rear is zero
+            if (!rear_dirty[(b - 2) >> 1])
+                continue;
+            rear_dirty[(b - 2) >> 1] = 0;
+        }
+        clear_words(bus[b], 4 * F);
+    }
 }
 
 void mixer_add_source(const s16 *src, s16 gain[NUM_BUSES][2], s16 previous[NUM_BUSES][2], u16 fresh)
@@ -252,6 +261,8 @@ void mixer_add_source(const s16 *src, s16 gain[NUM_BUSES][2], s16 previous[NUM_B
         }
         if (!gl && !gr && !pl && !pr)
             continue;
+        if (b == 2 || b == 4)
+            rear_dirty[(b - 2) >> 1] = 1;
         mix_job.acc = bus[b];
         mix_job.src = src;
         if (pl == gl && pr == gr) {
@@ -328,13 +339,18 @@ void output_stage(const u16 *job);
 
 void bus_normalize(s32 *x);
 void bus_return_chunk(const u16 *job);
+void bus_return_front_chunk(const u16 *job);
+static s32 *front[4]; // quad without rear
 
-static void bus_return(u16 *job)
+static void bus_return(u16 *job, u16 rear)
 {
     u16 k, n;
     for (n = 0; n < 4; n++) {
         output_poll();
-        bus_return_chunk(job);
+        if (rear)
+            bus_return_chunk(job);
+        else
+            bus_return_front_chunk(job);
         for (k = 0; k < 5; k++)
             job[k] += 160;
     }
@@ -347,7 +363,7 @@ static void bus_return(u16 *job)
 
 void mixer_end(u16 read_bank, u16 write_bank, vu16 *out)
 {
-    u16 b, k, ch;
+    u16 b, k, ch, rear;
     for (b = 0; b < 2; b++) {
         u16 route = mixer_route(b + 1);
         if (!route)
@@ -356,7 +372,13 @@ void mixer_end(u16 read_bank, u16 write_bank, vu16 *out)
         quad[1] = (route & 1) ? &bus[1 + 2 * b][1] : 0;
         quad[2] = &bus[2 + 2 * b][0];
         quad[3] = &bus[2 + 2 * b][1];
-        for (ch = 0; ch < 4; ch++)
+        // writers that can touch the rear
+        if (aux_enabled[b] || (delays[b].enabled && (delays[b].active & 0xC)))
+            rear_dirty[b] = 1;
+        rear = rear_dirty[b] || rear_mode || !quad[0];
+        front[0] = quad[0];
+        front[1] = quad[1];
+        for (ch = 0; ch < (rear ? 4 : 2); ch++)
             if (quad[ch])
                 bus_normalize(quad[ch]);
         if (aux_enabled[b]) {
@@ -382,7 +404,7 @@ void mixer_end(u16 read_bank, u16 write_bank, vu16 *out)
             select_bank(0);
         }
         if (delays[b].enabled)
-            run_delay(&delays[b], quad);
+            run_delay(&delays[b], rear ? quad : front);
         if (reverb_enabled(b))
             reverb_run(b, quad);
         return_job[0] = (u16)(unsigned)(quad[0] ? quad[0] : zero_bus);
@@ -396,13 +418,13 @@ void mixer_end(u16 read_bank, u16 write_bank, vu16 *out)
             if (rear_mode == 2)
                 return_job[4] = (u16)(unsigned)bus[BUS_POST];
             if (quad[0])
-                bus_return(return_job);
+                bus_return(return_job, 1);
             return_job[0] = return_job[1] = (u16)(unsigned)zero_bus;
             return_job[2] = (u16)(unsigned)quad[2];
             return_job[3] = (u16)(unsigned)quad[3];
             return_job[4] = (u16)(unsigned)bus[BUS_MAIN_REAR];
         }
-        bus_return(return_job);
+        bus_return(return_job, rear);
     }
     if (rear_mode)
         surround_run(bus[0], bus[BUS_MAIN_REAR], bus[BUS_POST], rear_mode);

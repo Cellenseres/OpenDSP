@@ -36,6 +36,8 @@ struct audio_codec {
     void *direct_pcm;
     u32 direct_stride;
 };
+// DSP MP3 default: 8 buffers, ~190 ms
+#define AUDIO_MP3_DSP_BUFFERS 8
 Result opendsp_audio_codec_open(audio_codec *c, const char *path, u32 backend, u32 count, u32 frames,
                                 u32 flags);
 void opendsp_audio_codec_close(audio_codec *c);

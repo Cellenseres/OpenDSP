@@ -511,8 +511,7 @@ Result opendspAudioOpen(opendspAudioStream **out, const char *path, const opends
     LightLock_Init(&s->lock);
     s->epoch = current_epoch();
     s->command_epoch = s->epoch;
-    u32 count = cfg.buffer_count ? cfg.buffer_count : 4;
-    r = opendsp_audio_codec_open(&s->codec, path, cfg.aac_backend, count, cfg.buffer_frames, cfg.flags);
+    r = opendsp_audio_codec_open(&s->codec, path, cfg.aac_backend, cfg.buffer_count, cfg.buffer_frames, cfg.flags);
     if (R_FAILED(r))
         goto fail;
     if (s->epoch != current_epoch() || flag(&sleeping)) {
@@ -522,6 +521,9 @@ Result opendspAudioOpen(opendspAudioStream **out, const char *path, const opends
     s->info = s->codec.info;
     s->backend = s->codec.backend;
     s->group = s->info.format != OPENDSP_AUDIO_WAV;
+    u32 count = cfg.buffer_count     ? cfg.buffer_count
+                : s->codec.direct_pcm ? AUDIO_MP3_DSP_BUFFERS
+                                      : 4;
     u32 frames = cfg.buffer_frames                     ? cfg.buffer_frames
                  : s->info.format == OPENDSP_AUDIO_MP3 ? 1152
                  : s->group                            ? 1024
