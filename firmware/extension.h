@@ -42,6 +42,7 @@ enum {
                                 // fifo empty, render hi, lo, render max hi, lo, period hi, lo,
                                 // period min hi, lo, period max hi, lo
     EXT_CMD_SLEEP_SET = 4,
+    EXT_CMD_LOAD = 5,           // reply: frames, mix, codec, period ticks (hi, lo)
     EXT_CMD_COUNT
 };
 

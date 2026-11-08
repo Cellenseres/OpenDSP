@@ -12,7 +12,7 @@
 #include "sleep.h"
 
 #define BOX ((vu16 *)EXT_BASE)
-#define FIRMWARE_VERSION 0x0102
+#define FIRMWARE_VERSION 0x0103
 #define CAPABILITIES                                                                                         \
     (EXT_CAP_MAILBOX | EXT_CAP_DELAY | EXT_CAP_REVERB | EXT_CAP_SLEEP | AAC_CAP_DSP | MP3_CAP_DSP | MP3_CAP_STREAM)
 
@@ -98,6 +98,17 @@ static u16 read_stats(vu16 *args)
     return EXT_OK;
 }
 
+// reply: frames, mix, codec, period ticks (hi, lo each)
+static u16 read_load(void)
+{
+    extern u32 load_frames, load_mix, load_codec, load_period;
+    reply_u32(0, load_frames);
+    reply_u32(2, load_mix);
+    reply_u32(4, load_codec);
+    reply_u32(6, load_period);
+    return EXT_OK;
+}
+
 static u16 handle(u16 command, vu16 *args)
 {
     if ((command >= AAC_CMD_OPEN && command <= AAC_CMD_STATS) ||
@@ -113,6 +124,8 @@ static u16 handle(u16 command, vu16 *args)
         return set_reverb(args);
     case EXT_CMD_STATS:
         return read_stats(args);
+    case EXT_CMD_LOAD:
+        return read_load();
     case EXT_CMD_SLEEP_SET:
         return sleep_configure(args);
     }

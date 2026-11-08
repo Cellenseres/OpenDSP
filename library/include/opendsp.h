@@ -66,6 +66,19 @@ typedef struct {
 // DSP timing. reset clears the peaks after reading them.
 Result opendspGetStats(opendspStats *stats, bool reset);
 
+// Running sums in DSP timer ticks, modulo 2^30.
+#define OPENDSP_LOAD_MASK 0x3FFFFFFFu
+typedef struct {
+    u32 struct_size;  // sizeof(opendspLoad)
+    u32 frames;       // frames counted
+    u32 mix_ticks;    // voices, mixing and effects
+    u32 codec_ticks;  // DSP decoders between frames
+    u32 period_ticks; // frame periods
+} opendspLoad;
+
+// Split DSP load. Needs firmware 1.3 or newer.
+Result opendspGetLoad(opendspLoad *load);
+
 #ifdef __cplusplus
 }
 #endif

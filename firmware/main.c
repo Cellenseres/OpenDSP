@@ -177,6 +177,22 @@ static u16 state;
 static u16 frames;
 static u16 resume_pending;
 
+// Running sums for EXT_CMD_LOAD.
+u32 load_frames, load_mix, load_codec, load_period;
+// Wrap at 2^30; adds saturate past 2^31.
+#define LOAD_MASK 0x3FFFFFFFUL
+
+static void load_add(u32 codec)
+{
+    // Skip timer misreads like stats.c.
+    if (stats.render_raw_last >= 0x00800000UL || codec >= 0x00800000UL)
+        return;
+    load_frames = (load_frames + 1) & LOAD_MASK;
+    load_mix = (load_mix + stats.render_raw_last) & LOAD_MASK;
+    load_codec = (load_codec + codec) & LOAD_MASK;
+    load_period = (load_period + stats.period_last) & LOAD_MASK;
+}
+
 // init answer waits for ARM semaphore 0x4000
 #define INIT_WAIT_PASSES 40000u
 static u16 init_pending, init_semaphore, init_wait;
@@ -399,9 +415,11 @@ int main(void)
             irq_disable();
             frames_due--;
             irq_enable();
+            u32 codec = stats_aac_used();
             stats_frame_begin(frames_due);
             render_frame();
             stats_frame_end();
+            load_add(codec);
         } else if (state == STATE_ON && !resume_pending)
             aac_stream_poll();
     }

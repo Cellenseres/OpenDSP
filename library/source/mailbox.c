@@ -23,10 +23,13 @@ void opendsp_mailbox_setup(void)
 
 static vu16 *find_mailbox(void)
 {
-    u32 address;
+    // Fixed mapping; skip the service call.
+    static u32 address;
     vu16 *box;
-    if (R_FAILED(DSP_ConvertProcessAddressFromDspDram(EXT_BASE, &address)))
+    if (!address && R_FAILED(DSP_ConvertProcessAddressFromDspDram(EXT_BASE, &address))) {
+        address = 0;
         return NULL;
+    }
     box = (vu16 *)address;
     if (box[EXT_MAGIC0] != EXT_MAGIC0_VALUE || box[EXT_MAGIC1] != EXT_MAGIC1_VALUE ||
         box[EXT_PROTOCOL] != EXT_PROTOCOL_VERSION)
@@ -124,6 +127,22 @@ Result opendspGetFirmwareVersion(u16 *version)
     *version = box ? box[EXT_VERSION] : 0;
     LightLock_Unlock(&lock);
     return box ? 0 : OPENDSP_ERR_NOT_OPENDSP;
+}
+
+Result opendspGetLoad(opendspLoad *load)
+{
+    u16 r[8];
+    Result rc;
+    if (!load || load->struct_size != sizeof(*load))
+        return OPENDSP_ERR_ARGUMENT;
+    rc = opendsp_request(EXT_CMD_LOAD, NULL, 0, r, 8);
+    if (R_FAILED(rc))
+        return rc;
+    load->frames = ((u32)r[0] << 16) | r[1];
+    load->mix_ticks = ((u32)r[2] << 16) | r[3];
+    load->codec_ticks = ((u32)r[4] << 16) | r[5];
+    load->period_ticks = ((u32)r[6] << 16) | r[7];
+    return 0;
 }
 
 Result opendspGetStats(opendspStats *stats, bool reset)
