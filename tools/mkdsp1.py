@@ -14,7 +14,7 @@ DATA_BASE = 0x10000000
 HEADER_SIZE = 0x300
 
 
-def elf_segments(path):
+def elf_segments(path, bank_window=None):
     b = open(path, "rb").read()
     if b[:4] != b"\x7fELF" or b[4] != 1 or b[5] != 1:
         sys.exit("expected a 32-bit little-endian ELF")
@@ -34,6 +34,8 @@ def elf_segments(path):
                 continue              # AAC bank1 tables uploaded explicitly
             segments.append((2, (p_vaddr - DATA_BASE) // 2, data))
         else:
+            if bank_window is not None and p_vaddr == bank_window:
+                continue
             segments.append((0, p_vaddr // 2, data))
     return segments
 
@@ -66,8 +68,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("elf")
     ap.add_argument("-o", "--output", required=True)
+    ap.add_argument("--bank-window", type=lambda value: int(value, 0))
     args = ap.parse_args()
-    image = pack(elf_segments(args.elf))
+    image = pack(elf_segments(args.elf, args.bank_window))
     open(args.output, "wb").write(image)
     print("%s: %d bytes" % (args.output, len(image)))
 

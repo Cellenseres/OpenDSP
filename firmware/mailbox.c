@@ -9,12 +9,25 @@
 #include "aac/stream.h"
 #include "aac_protocol.h"
 #include "mp3_protocol.h"
+#ifdef OPENDSP_CODEC_BANKS
+#include "codec_banks_protocol.h"
+#include "ogg/banks.h"
+#include "ogg/stream.h"
+#include "ogg_protocol.h"
+#ifdef OPENDSP_VORBIS_DSP
+#define BANK_CAPABILITIES (CODEC_CAP_BANKS | OGG_CAP_OPUS_DSP | OGG_CAP_VORBIS_DSP | OGG_CAP_DONE_WORD)
+#else
+#define BANK_CAPABILITIES (CODEC_CAP_BANKS | OGG_CAP_OPUS_DSP | OGG_CAP_DONE_WORD)
+#endif
+#else
+#define BANK_CAPABILITIES 0
+#endif
 #include "sleep.h"
 
 #define BOX ((vu16 *)EXT_BASE)
 #define FIRMWARE_VERSION 0x0103
 #define CAPABILITIES                                                                                         \
-    (EXT_CAP_MAILBOX | EXT_CAP_DELAY | EXT_CAP_REVERB | EXT_CAP_SLEEP | AAC_CAP_DSP | MP3_CAP_DSP | MP3_CAP_STREAM)
+    (EXT_CAP_MAILBOX | EXT_CAP_DELAY | EXT_CAP_REVERB | EXT_CAP_SLEEP | AAC_CAP_DSP | MP3_CAP_DSP | MP3_CAP_STREAM | BANK_CAPABILITIES)
 
 void mailbox_init(void)
 {
@@ -111,6 +124,17 @@ static u16 read_load(void)
 
 static u16 handle(u16 command, vu16 *args)
 {
+#ifdef OPENDSP_CODEC_BANKS
+    if (command >= CODEC_BANK_CONFIGURE && command <= CODEC_BANK_CLOSE)
+        return codec_bank_command(command, args, BOX + EXT_REPLY, aac_stream_busy() || ogg_stream_busy());
+    if (command >= OGG_CMD_OPEN && command <=
+#ifdef OPENDSP_VORBIS_DSP
+        OGG_CMD_RESET)
+#else
+        OGG_CMD_STATS)
+#endif
+        return ogg_stream_command(command, args, BOX + EXT_REPLY, aac_stream_busy());
+#endif
     if ((command >= AAC_CMD_OPEN && command <= AAC_CMD_STATS) ||
         (command >= MP3_CMD_OPEN && command <= MP3_CMD_STREAM_OPEN))
         return aac_stream_command(command, args, BOX + EXT_REPLY);

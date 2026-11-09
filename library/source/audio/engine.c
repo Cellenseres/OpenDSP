@@ -12,12 +12,17 @@ struct opendspAudioStream {
     audio_output output;
     opendspAudioInfo info;
     opendspAudioStats stats;
+    opendspAudioLoopInfo loop, cache_loop;
+    u8 *loop_pcm;
+    u32 loop_frames, loop_capacity, loop_bytes;
+    u64 decode_position;
+    bool cache_active;
     opendspAudioState state;
     Result error;
     u32 generation, applied_generation, epoch, command_epoch, refs;
     u64 target, position;
     u32 backend, group;
-    bool closing, play, paused, looping, looped, eof, started, reset;
+    bool closing, play, paused, looping, eof, started, reset;
     bool rate_dirty, mix_dirty, control_dirty;
     float rate, volume, mix[12];
 };
@@ -108,14 +113,7 @@ void opendsp_audio_wakeup(bool restored)
 
 static u64 source_position(const opendspAudioStream *s)
 {
-    u64 position = s->output.position;
-    if ((s->looping || s->looped) && s->info.duration_known && s->info.total_frames &&
-        position >= s->info.total_frames) {
-        position %= s->info.total_frames;
-        if (s->state == OPENDSP_AUDIO_FINISHED && !position && s->output.position)
-            position = s->info.total_frames;
-    }
-    return position;
+    return s->output.source_position;
 }
 
 static void publish(opendspAudioStream *s, u64 elapsed)
@@ -123,8 +121,8 @@ static void publish(opendspAudioStream *s, u64 elapsed)
     audio_output *o = &s->output;
     LightLock_Lock(&s->lock);
     s->info = s->codec.info;
-    if (!s->paused)
-        s->position = source_position(s);
+    s->position = source_position(s);
+    s->stats.codec_bytes = s->codec.memory + s->loop_bytes;
     s->stats.input_bytes = s->codec.stats.input_bytes;
     s->stats.decoded_frames = s->codec.stats.decoded_frames;
     s->stats.skipped_bytes = s->codec.stats.skipped_bytes;
@@ -162,6 +160,165 @@ static void fail(opendspAudioStream *s, Result r, u32 generation)
     s->applied_generation = generation;
     LightLock_Unlock(&s->lock);
     opendsp_audio_output_retire(&s->output, current_epoch());
+}
+
+// Cache loops during their first traversal.
+#define AUDIO_LOOP_CACHE_BYTES (2u * 1024u * 1024u)
+// Start once two buffers hold this.
+#define START_FRAMES 8192u
+static Result prime_loop(opendspAudioStream *s, u64 target)
+{
+    audio_codec *c = &s->codec;
+    s->cache_active = false;
+    LightLock_Lock(&s->lock);
+    opendspAudioLoopInfo loop = s->loop;
+    bool looping = s->looping;
+    LightLock_Unlock(&s->lock);
+    if (!loop.available && c->info.duration_known && c->info.total_frames) {
+        loop.start_frame = 0;
+        loop.end_frame = c->info.total_frames;
+        loop.available = true;
+    }
+    if (!looping || !c->seekable)
+        loop.available = false;
+    u32 capacity = 0;
+    if (loop.available) {
+        u64 length = loop.end_frame - loop.start_frame;
+        capacity = length <= AUDIO_LOOP_CACHE_BYTES / s->output.frame_bytes
+                       ? (u32)length : c->info.sample_rate / 4;
+        if (length > capacity && capacity > 16384)
+            capacity = 16384;
+    }
+    if (capacity != s->loop_capacity || loop.start_frame != s->cache_loop.start_frame ||
+        loop.end_frame != s->cache_loop.end_frame) {
+        free(s->loop_pcm);
+        s->loop_pcm = NULL;
+        s->loop_frames = s->loop_capacity = s->loop_bytes = 0;
+        if (capacity) {
+            s->loop_pcm = malloc(capacity * s->output.frame_bytes);
+            if (!s->loop_pcm)
+                return OPENDSP_AUDIO_ERR_MEMORY;
+            s->loop_capacity = capacity;
+            s->loop_bytes = capacity * s->output.frame_bytes;
+        }
+    }
+    s->cache_loop = loop;
+    if (loop.available) {
+        bool whole = capacity == loop.end_frame - loop.start_frame;
+        if (target >= loop.end_frame)
+            target = loop.start_frame;
+        u32 needed = whole ? (target > loop.start_frame ? (u32)(target - loop.start_frame) : 0)
+                           : capacity;
+        if (s->loop_frames < needed) {
+            Result r = c->ops->seek(c, loop.start_frame + s->loop_frames);
+            if (R_FAILED(r))
+                return r;
+        }
+        while (s->loop_frames < needed) {
+            u32 got = 0;
+            Result r = c->ops->read(c, s->loop_pcm + s->loop_frames * s->output.frame_bytes,
+                                    needed - s->loop_frames, &got);
+            if (R_FAILED(r))
+                return r;
+            if (!got)
+                return OPENDSP_AUDIO_ERR_TRUNCATED;
+            s->loop_frames += got;
+        }
+        s->cache_active = whole && s->loop_frames == capacity && target >= loop.start_frame;
+    }
+    s->decode_position = target;
+    return s->cache_active ? 0 : c->ops->seek(c, target);
+}
+
+static void capture_loop(opendspAudioStream *s, const u8 *pcm, u64 source, u32 frames)
+{
+    if (!s->cache_loop.available || s->loop_frames == s->loop_capacity)
+        return;
+    u64 next = s->cache_loop.start_frame + s->loop_frames;
+    if (source > next || source + frames <= next)
+        return;
+    u32 skip = (u32)(next - source);
+    u32 count = frames - skip;
+    if (count > s->loop_capacity - s->loop_frames)
+        count = s->loop_capacity - s->loop_frames;
+    memcpy(s->loop_pcm + s->loop_frames * s->output.frame_bytes,
+           pcm + skip * s->output.frame_bytes, count * s->output.frame_bytes);
+    s->loop_frames += count;
+}
+
+static void count_loops(opendspAudioStream *s, u32 count)
+{
+    LightLock_Lock(&s->lock);
+    s->stats.loops += count;
+    LightLock_Unlock(&s->lock);
+}
+
+static Result read_source(opendspAudioStream *s, int buffer, u32 *frames, u64 *source,
+                           bool *repeated)
+{
+    audio_codec *c = &s->codec;
+    audio_output *o = &s->output;
+    opendspAudioLoopInfo *loop = &s->cache_loop;
+    *frames = 0;
+    *repeated = false;
+    if (loop->available && s->decode_position >= loop->end_frame) {
+        s->decode_position = loop->start_frame;
+        s->cache_active = true;
+        count_loops(s, 1);
+    }
+    *source = s->decode_position;
+    if (s->cache_active) {
+        u64 offset = s->decode_position - loop->start_frame;
+        if (offset < s->loop_frames) {
+            bool whole = s->loop_frames == loop->end_frame - loop->start_frame;
+            u32 capacity = o->frames;
+            u32 loops = 0;
+            u8 *out = opendsp_audio_output_data(o, buffer);
+            while (*frames < capacity && offset < s->loop_frames) {
+                u32 n = s->loop_frames - (u32)offset;
+                if (n > capacity - *frames)
+                    n = capacity - *frames;
+                memcpy(out + *frames * o->frame_bytes, s->loop_pcm + offset * o->frame_bytes,
+                       n * o->frame_bytes);
+                *frames += n;
+                offset += n;
+                s->decode_position += n;
+                if (whole && offset == s->loop_frames) {
+                    offset = 0;
+                    s->decode_position = loop->start_frame;
+                    ++loops;
+                }
+            }
+            if (loops)
+                count_loops(s, loops);
+            *repeated = whole;
+            return 0;
+        }
+        Result r = c->ops->seek(c, s->decode_position);
+        if (R_FAILED(r))
+            return r;
+        s->cache_active = false;
+    }
+    u32 capacity = o->frames;
+    if (loop->available && loop->end_frame - s->decode_position < capacity)
+        capacity = (u32)(loop->end_frame - s->decode_position);
+    u8 *out = opendsp_audio_output_data(o, buffer);
+    // Combine short packets into output buffers.
+    do {
+        u32 got = 0;
+        Result r = c->ops->read(c, out + *frames * o->frame_bytes, capacity - *frames, &got);
+        if (R_FAILED(r))
+            return r;
+        capture_loop(s, out + *frames * o->frame_bytes, s->decode_position, got);
+        *frames += got;
+        s->decode_position += got;
+        if (!got) {
+            if (loop->available)
+                return OPENDSP_AUDIO_ERR_TRUNCATED;
+            break;
+        }
+    } while (*frames < capacity && c->seekable);
+    return 0;
 }
 
 static bool step(opendspAudioStream *s)
@@ -213,21 +370,21 @@ static bool step(opendspAudioStream *s)
         if (!opendsp_audio_output_fenced(o, e, flag(&shutdown_complete)))
             return false;
         s->codec.in.expected = generation;
-        Result r = s->codec.ops->seek(&s->codec, target);
+        Result r = prime_loop(s, target);
         if (generation != __atomic_load_n(&s->generation, __ATOMIC_ACQUIRE))
             return false;
         if (R_FAILED(r)) {
             fail(s, r, generation);
             return false;
         }
-        opendsp_audio_output_reset(o, target);
-        s->eof = s->started = s->looped = false;
+        opendsp_audio_output_reset(o, s->decode_position);
+        s->eof = s->started = false;
         LightLock_Lock(&s->lock);
         if (generation == __atomic_load_n(&s->generation, __ATOMIC_ACQUIRE)) {
             s->reset = false;
             s->applied_generation = generation;
             s->error = 0;
-            s->position = target;
+            s->position = s->decode_position;
             opendsp_audio_output_configure(o, &s->info, s->rate);
             s->state = !s->play    ? OPENDSP_AUDIO_STOPPED
                        : s->paused ? OPENDSP_AUDIO_PAUSED
@@ -268,11 +425,11 @@ static bool step(opendspAudioStream *s)
         }
         if (eof) {
             if (s->looping && s->codec.position) {
-                s->looped = true;
                 LightLock_Lock(&s->lock);
                 ++s->stats.loops;
                 LightLock_Unlock(&s->lock);
                 r = s->codec.ops->seek(&s->codec, 0);
+                o->next_source = 0;
                 if (R_FAILED(r) && r != OPENDSP_AUDIO_ERR_BUSY)
                     fail(s, r, generation);
                 return true;
@@ -281,8 +438,10 @@ static bool step(opendspAudioStream *s)
         }
     } else if (!s->eof && buffer >= 0) {
         u32 frames = 0;
+        u64 source;
+        bool repeated;
         s->codec.in.expected = generation;
-        Result r = s->codec.ops->read(&s->codec, opendsp_audio_output_data(o, buffer), o->frames, &frames);
+        Result r = read_source(s, buffer, &frames, &source, &repeated);
         LightLock_Lock(&s->lock);
         if (generation != __atomic_load_n(&s->generation, __ATOMIC_ACQUIRE)) {
             LightLock_Unlock(&s->lock);
@@ -299,13 +458,15 @@ static bool step(opendspAudioStream *s)
             return false;
         }
         if (frames) {
-            opendsp_audio_output_queue(o, buffer, frames);
+            opendsp_audio_output_queue_source(o, buffer, frames, source,
+                                              repeated ? s->cache_loop.start_frame : 0,
+                                              repeated ? s->cache_loop.end_frame : 0);
             progress = true;
         } else if (s->looping && s->codec.position) {
-            s->looped = true;
             ++s->stats.loops;
             LightLock_Unlock(&s->lock);
             r = s->codec.ops->seek(&s->codec, 0);
+            s->decode_position = 0;
             if (R_FAILED(r) && r != OPENDSP_AUDIO_ERR_BUSY)
                 fail(s, r, generation);
             return true;
@@ -323,7 +484,7 @@ static bool step(opendspAudioStream *s)
             s->started = false;
             opendsp_audio_output_pause(o, true);
         } else {
-            if (!s->started && (o->queued == o->count || (s->eof && o->queued)))
+            if (!s->started && (o->queued == o->count || (o->queued >= 2 && o->queued_frames >= START_FRAMES) || (s->eof && o->queued)))
                 s->started = true;
             if (s->started) {
                 opendsp_audio_output_pause(o, false);
@@ -520,14 +681,20 @@ Result opendspAudioOpen(opendspAudioStream **out, const char *path, const opends
     }
     s->info = s->codec.info;
     s->backend = s->codec.backend;
+    s->loop = s->codec.loop;
+    if ((cfg.flags & OPENDSP_AUDIO_LOOP) && s->loop.status == OPENDSP_AUDIO_LOOP_INVALID) {
+        r = OPENDSP_AUDIO_ERR_FORMAT;
+        goto fail;
+    }
     s->group = s->info.format != OPENDSP_AUDIO_WAV;
     u32 count = cfg.buffer_count     ? cfg.buffer_count
                 : s->codec.direct_pcm ? AUDIO_MP3_DSP_BUFFERS
                                       : 4;
-    u32 frames = cfg.buffer_frames                     ? cfg.buffer_frames
-                 : s->info.format == OPENDSP_AUDIO_MP3 ? 1152
-                 : s->group                            ? 1024
-                                                       : 2048;
+    u32 frames = cfg.buffer_frames                       ? cfg.buffer_frames
+                 : s->info.format >= OPENDSP_AUDIO_VORBIS ? 4096
+                 : s->info.format == OPENDSP_AUDIO_MP3   ? 1152
+                 : s->group                              ? 1024
+                                                         : 2048;
     r = opendsp_audio_output_open(&s->output, channel, count, frames, &s->info, s->codec.direct_pcm,
                                   s->codec.direct_stride);
     if (R_FAILED(r))
@@ -568,11 +735,11 @@ static Result command(opendspAudioStream *s, audio_command cmd, u64 frame)
         LightLock_Unlock(&s->lock);
         return OPENDSP_AUDIO_ERR_STATE;
     }
-    if (cmd == AUDIO_SEEK && ((s->info.format != OPENDSP_AUDIO_WAV && frame) ||
+    if (cmd == AUDIO_SEEK && ((!s->codec.seekable && frame) ||
                               (s->info.duration_known && frame > s->info.total_frames))) {
         LightLock_Unlock(&s->lock);
-        return s->info.format != OPENDSP_AUDIO_WAV ? OPENDSP_AUDIO_ERR_UNSUPPORTED
-                                                   : OPENDSP_AUDIO_ERR_ARGUMENT;
+        return !s->codec.seekable && frame ? OPENDSP_AUDIO_ERR_UNSUPPORTED
+                                            : OPENDSP_AUDIO_ERR_ARGUMENT;
     }
     if (cmd == AUDIO_PLAY) {
         if (!s->play) {
@@ -666,10 +833,11 @@ Result opendspAudioClose(opendspAudioStream **handle)
             LightLock_Unlock(&lifecycle_lock);
             return OPENDSP_AUDIO_ERR_BUSY;
         }
-        svcSleepThread(5000000);
+        svcSleepThread(1000000);
     }
     opendsp_audio_codec_close(&s->codec);
     opendsp_audio_output_close(&s->output);
+    free(s->loop_pcm);
     LightLock_Lock(&registry_lock);
     streams[s->output.channel] = NULL;
     LightLock_Unlock(&registry_lock);
@@ -684,13 +852,82 @@ Result opendspAudioSetLoop(opendspAudioStream *s, bool loop)
     if (!s)
         return OPENDSP_AUDIO_ERR_ARGUMENT;
     LightLock_Lock(&s->lock);
-    if (s->closing || !flag(&ready)) {
+    if (s->closing || !flag(&ready) || flag(&sleeping)) {
         LightLock_Unlock(&s->lock);
         return OPENDSP_AUDIO_ERR_STATE;
     }
-    s->looping = loop;
+    if (loop && s->loop.status == OPENDSP_AUDIO_LOOP_INVALID) {
+        LightLock_Unlock(&s->lock);
+        return OPENDSP_AUDIO_ERR_FORMAT;
+    }
+    if (s->looping != loop) {
+        s->looping = loop;
+        if (s->codec.seekable) {
+            if (s->play && !s->reset)
+                s->target = s->position;
+            s->reset = true;
+            cancel(s);
+            s->command_epoch = current_epoch();
+        }
+    }
     LightLock_Unlock(&s->lock);
     wake_stream(s);
+    return 0;
+}
+
+static Result loop_range(opendspAudioStream *s, bool clear, u64 start, u64 end)
+{
+    if (!s || (!clear && start >= end))
+        return OPENDSP_AUDIO_ERR_ARGUMENT;
+    LightLock_Lock(&s->lock);
+    Result r = 0;
+    if (s->closing || !flag(&ready) || flag(&sleeping))
+        r = OPENDSP_AUDIO_ERR_STATE;
+    else if (!s->codec.seekable)
+        r = OPENDSP_AUDIO_ERR_UNSUPPORTED;
+    else if (clear && s->looping && s->codec.loop.status == OPENDSP_AUDIO_LOOP_INVALID)
+        r = OPENDSP_AUDIO_ERR_FORMAT;
+    else if (!clear && (!s->info.duration_known || end > s->info.total_frames))
+        r = OPENDSP_AUDIO_ERR_ARGUMENT;
+    else {
+        if (clear)
+            s->loop = s->codec.loop;
+        else {
+            memset(&s->loop, 0, sizeof(s->loop));
+            s->loop.struct_size = sizeof(s->loop);
+            s->loop.available = true;
+            s->loop.status = OPENDSP_AUDIO_LOOP_VALID;
+            s->loop.start_frame = start;
+            s->loop.end_frame = end;
+        }
+        if (s->play && !s->reset)
+            s->target = s->position;
+        s->reset = true;
+        cancel(s);
+        s->command_epoch = current_epoch();
+    }
+    LightLock_Unlock(&s->lock);
+    wake_stream(s);
+    return r;
+}
+
+Result opendspAudioSetLoopRange(opendspAudioStream *s, u64 start, u64 end)
+{
+    return loop_range(s, false, start, end);
+}
+
+Result opendspAudioClearLoopRange(opendspAudioStream *s)
+{
+    return loop_range(s, true, 0, 0);
+}
+
+Result opendspAudioGetLoopInfo(opendspAudioStream *s, opendspAudioLoopInfo *info)
+{
+    if (!s || !info || info->struct_size < sizeof(*info))
+        return OPENDSP_AUDIO_ERR_ARGUMENT;
+    LightLock_Lock(&s->lock);
+    *info = s->loop;
+    LightLock_Unlock(&s->lock);
     return 0;
 }
 Result opendspAudioSetVolume(opendspAudioStream *s, float volume)

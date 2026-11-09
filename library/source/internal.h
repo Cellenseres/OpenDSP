@@ -5,10 +5,19 @@
 
 extern bool opendsp_running;
 
+void opendsp_codec_diagnostic(const char *stage, Result result) __attribute__((weak));
+static inline void opendsp_codec_error(const char *stage, Result result)
+{
+    if (R_FAILED(result) && opendsp_codec_diagnostic)
+        opendsp_codec_diagnostic(stage, result);
+}
+
 void opendsp_mailbox_setup(void);
 
 // Sends one mailbox request and waits for the answer.
 Result opendsp_request(u16 command, const u16 *args, u16 arg_count, u16 *reply, u16 reply_count);
+// Reads one mailbox word, 0 if absent.
+u16 opendsp_mailbox_peek(u16 word);
 
 void opendsp_effects_release(void);
 void opendsp_aac_setup(void);

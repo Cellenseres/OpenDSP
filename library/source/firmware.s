@@ -20,3 +20,10 @@ opendsp_aac_tables:
     .global opendsp_mp3_tables
 opendsp_mp3_tables:
     .incbin "mp3_tables.bin"
+#ifdef OPENDSP_CODEC_BANKS
+    .section .rodata.opendsp_codec_banks, "a"
+    .balign 128
+    .global opendsp_codec_banks
+opendsp_codec_banks:
+    .incbin "codec_banks.bin"
+#endif

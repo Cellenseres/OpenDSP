@@ -40,6 +40,15 @@ void opendsp_audio_output_pause(audio_output *o, bool paused)
     o->pause_known = true;
 }
 
+static u64 buffer_source(const audio_buffer *b, u32 offset)
+{
+    u64 source = b->source_start + offset;
+    if (b->source_loop_end > b->source_loop_start && source >= b->source_loop_end)
+        source = b->source_loop_start +
+                 (source - b->source_loop_start) % (b->source_loop_end - b->source_loop_start);
+    return source;
+}
+
 void opendsp_audio_output_reap(audio_output *o)
 {
     if (o->retiring || !o->queued)
@@ -53,20 +62,26 @@ void opendsp_audio_output_reap(audio_output *o)
         u8 status = __atomic_load_n(&b->wave.status, __ATOMIC_ACQUIRE);
         if (status == NDSP_WBUF_DONE) {
             u64 end = b->start + b->wave.nsamples;
-            if (end > o->completed)
+            if (end > o->completed) {
                 o->completed = end;
+                o->source_completed = buffer_source(b, b->wave.nsamples);
+            }
             b->queued = false;
             ++o->played;
             --o->queued;
             o->queued_frames -= b->wave.nsamples;
         } else if (b->wave.sequence_id == seq && status == NDSP_WBUF_PLAYING) {
             u64 position = b->start + (sample < b->wave.nsamples ? sample : b->wave.nsamples);
-            if (position > o->position)
+            if (position >= o->position) {
                 o->position = position;
+                o->source_position = buffer_source(b, (u32)(position - b->start));
+            }
         }
     }
-    if (o->completed > o->position)
+    if (o->completed > o->position) {
         o->position = o->completed;
+        o->source_position = o->source_completed;
+    }
 }
 
 int opendsp_audio_output_free(const audio_output *o)
@@ -85,8 +100,18 @@ void *opendsp_audio_output_data(audio_output *o, int buffer)
 
 void opendsp_audio_output_queue(audio_output *o, int buffer, u32 frames)
 {
+    opendsp_audio_output_queue_source(o, buffer, frames, o->next_source, 0, 0);
+}
+
+void opendsp_audio_output_queue_source(audio_output *o, int buffer, u32 frames, u64 source,
+                                      u64 loop_start, u64 loop_end)
+{
     audio_buffer *b = &o->buffers[buffer];
     b->start = o->submitted;
+    b->source_start = source;
+    b->source_loop_start = loop_start;
+    b->source_loop_end = loop_end;
+    o->next_source = source + frames;
     b->wave.nsamples = frames;
     b->wave.looping = false;
     b->queued = true;
@@ -125,8 +150,9 @@ bool opendsp_audio_output_fenced(audio_output *o, u32 epoch, bool shutdown)
         o->fence_frame = frame;
         o->fence_steps = 0;
     } else if (frame != o->fence_frame) {
+        // Count frames, not polls.
+        o->fence_steps += frame - o->fence_frame;
         o->fence_frame = frame;
-        ++o->fence_steps;
     }
     // Clear marks host wave buffers DONE before DSP has acknowledged the command.
     return o->fence_steps >= 4;
@@ -140,6 +166,7 @@ void opendsp_audio_output_reset(audio_output *o, u64 position)
     }
     o->queued = o->queued_frames = 0;
     o->submitted = o->completed = o->position = position;
+    o->source_position = o->source_completed = o->next_source = position;
     o->retiring = o->touched = false;
 }
 

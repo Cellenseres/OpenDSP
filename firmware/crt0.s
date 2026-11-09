@@ -91,6 +91,60 @@ int2_vec:
 // Save caller-saved state, call the C handler.
 // Not saved: stt2 (ends block loops), p0/p1. The handlers must not use
 // block repeat; kernels without the multiplier run with interrupts on.
+.macro irq_page_enter
+.ifdef OGG_PAGE_IRQ
+    // Paged handlers also preserve PCMHI.
+    push    r0
+    push    r1
+    push    stt2
+    mov     0x790e, r0
+    mov     [r0], a0
+    mov     0x7910, r0
+    mov     [r0], a1
+    mov     sp, b0
+    mov     0x790e, r0
+    mov     0, b1
+    mov     b1l, [r0]
+    mov     0x0f85, r0
+    mov     b0l, [r0]
+    mov     0x0f86, r0
+    mov     a0l, [r0]
+    mov     0x0f87, r0
+    mov     a1l, [r0]
+    cmp     0, a0
+    br      .Lirq_foreground\@, eq
+    mov     0x05ff, r1
+    mov     r1, sp
+.Lirq_foreground\@:
+    mov     0x7910, r0
+    mov     0, a0
+    mov     a0l, [r0]
+.endif
+.endm
+
+.macro irq_page_leave
+.ifdef OGG_PAGE_IRQ
+    mov     0x0f85, r0
+    mov     [r0], b0
+    mov     0x0f86, r0
+    mov     [r0], a0
+    mov     0x0f87, r0
+    mov     [r0], a1
+    mov     0x7910, r0
+    mov     a1l, [r0]
+    mov     0x790e, r0
+    mov     a0l, [r0]
+    mov     b0l, sp
+    pop     a0l
+    // Preserve loops when restoring PCMHI.
+    and     0x00c0, a0
+    push    a0l
+    pop     stt2
+    pop     r1
+    pop     r0
+.endif
+.endm
+
 int0_vec:
     push    stt0
     push    stt1
@@ -118,6 +172,7 @@ int0_vec:
     push    cfgj
     push    ar0
     push    ar1
+    irq_page_enter
     call    isr_int0, always
     br      isr_restore, always
 int1_vec:
@@ -147,8 +202,10 @@ int1_vec:
     push    cfgj
     push    ar0
     push    ar1
+    irq_page_enter
     call    isr_int1, always
 isr_restore:
+    irq_page_leave
     pop     ar1
     pop     ar0
     pop     cfgj

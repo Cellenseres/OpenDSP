@@ -10,6 +10,10 @@
 #include "sleep.h"
 #include "extension.h"
 #include "aac/stream.h"
+#ifdef OPENDSP_CODEC_BANKS
+#include "ogg/banks.h"
+#include "ogg/stream.h"
+#endif
 
 #define PIPE_TABLE 0x0800
 #define PIPE_BUFFERS 0x0900
@@ -247,7 +251,12 @@ static void handle_audio_command(void)
             if (((vu16 *)EXT_BASE)[SLEEP_CORE_RESTORED]) {
                 u16 restored = sleep_restore();
                 ((vu16 *)EXT_BASE)[SLEEP_RESTORED] = restored;
-                if (restored) aac_stream_resume();
+                if (restored) {
+#ifdef OPENDSP_CODEC_BANKS
+                    codec_bank_resume();
+#endif
+                    aac_stream_resume();
+                }
             }
             clear_bank(0);
             clear_bank(1);
@@ -420,7 +429,15 @@ int main(void)
             render_frame();
             stats_frame_end();
             load_add(codec);
-        } else if (state == STATE_ON && !resume_pending)
+        } else if (state == STATE_ON && !resume_pending) {
+#ifdef OPENDSP_CODEC_BANKS
+            if (codec_bank_poll() > 0) continue;
+            if (ogg_stream_busy()) {
+                ogg_stream_poll();
+                continue;
+            }
+#endif
             aac_stream_poll();
+        }
     }
 }

@@ -34,14 +34,28 @@ typedef enum {
     OPENDSP_AUDIO_STOPPING,
     OPENDSP_AUDIO_ERROR
 } opendspAudioState;
-typedef enum { OPENDSP_AUDIO_WAV, OPENDSP_AUDIO_AAC, OPENDSP_AUDIO_MP3 } opendspAudioFormat;
+typedef enum {
+    OPENDSP_AUDIO_WAV, OPENDSP_AUDIO_AAC, OPENDSP_AUDIO_MP3,
+    OPENDSP_AUDIO_VORBIS, OPENDSP_AUDIO_OPUS
+} opendspAudioFormat;
+
+typedef enum {
+    OPENDSP_AUDIO_LOOP_NONE, OPENDSP_AUDIO_LOOP_VALID, OPENDSP_AUDIO_LOOP_INVALID
+} opendspAudioLoopStatus;
+
+typedef struct {
+    u32 struct_size;
+    bool available, from_tags;
+    u64 start_frame, end_frame; // Start is inclusive; end is exclusive.
+    u32 status;
+} opendspAudioLoopInfo;
 
 typedef struct {
     u32 struct_size;
     s32 channel;
     u32 buffer_count;  // 0 = 4 (DSP MP3: 8); otherwise 2..8 (MP3: 3..8)
-    u32 buffer_frames; // 0 = WAV 2048 / AAC 1024 / MP3 1152; otherwise 256..16384
-    u32 aac_backend;   // AAC/MP3 backend; MP3 AUTO requires DSP, ARM11 is explicit
+    u32 buffer_frames; // Zero selects the codec default.
+    u32 aac_backend;   // Decoder preference; MP3 AUTO requires DSP.
     u32 flags;
 } opendspAudioConfig;
 #define OPENDSP_AUDIO_CONFIG_INIT                                                                            \
@@ -52,7 +66,7 @@ typedef struct {
     opendspAudioFormat format;
     u32 sample_rate;
     u16 channels, bits;
-    u64 total_frames; // Compressed: known after a complete pass; includes encoder padding
+    u64 total_frames; // AAC/MP3 totals include encoder padding.
     bool duration_known;
     u32 aac_flags; // Accumulated codec INFO_* flags (MP3 uses CHANGED/DISCONTINUITY)
 } opendspAudioInfo;
@@ -84,6 +98,12 @@ Result opendspAudioSeek(opendspAudioStream *stream, u64 frame); // AAC/MP3 suppo
 // On BUSY the handle and channel remain owned; retry. Success sets *stream = NULL.
 Result opendspAudioClose(opendspAudioStream **stream);
 Result opendspAudioSetLoop(opendspAudioStream *stream, bool loop);
+// Range changes restart queued playback asynchronously.
+// Clear restores file loop metadata.
+// Invalid tags require a valid override.
+Result opendspAudioSetLoopRange(opendspAudioStream *stream, u64 start_frame, u64 end_frame);
+Result opendspAudioClearLoopRange(opendspAudioStream *stream);
+Result opendspAudioGetLoopInfo(opendspAudioStream *stream, opendspAudioLoopInfo *info);
 Result opendspAudioSetVolume(opendspAudioStream *stream, float volume);     // 0..1, scales all mix gains
 Result opendspAudioSetMix(opendspAudioStream *stream, const float mix[12]); // Each gain: -1..1
 Result opendspAudioSetRate(opendspAudioStream *stream, float sample_rate);  // Playback Hz: 1..130912
@@ -96,9 +116,11 @@ Result opendspAudioGetDecoderStats(opendspAudioStream *stream, opendspAudioDecod
 opendspAudioState opendspAudioGetState(opendspAudioStream *stream);
 u64 opendspAudioGetPosition(opendspAudioStream *stream); // audible PCM frames, not file read-ahead
 u32 opendspAudioGetBackend(opendspAudioStream *stream);  // AUTO for WAV
+// Check support without reserving DSP resources.
+bool opendspAudioSupportsBackend(opendspAudioFormat format, u32 backend);
 s32 opendspAudioGetChannel(opendspAudioStream *stream);
 Result opendspAudioGetLastError(opendspAudioStream *stream);
-// Optional NDSP callback forwarding for WAV/AAC. MP3 uses its own DSP pipe event.
+// Forward NDSP callbacks when applicable.
 void opendspAudioNotifyFrame(void);
 
 #ifdef __cplusplus

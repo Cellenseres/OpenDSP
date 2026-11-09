@@ -10,3 +10,6 @@ void aac_stream_frame(void);
 u16 aac_stream_command(u16 command, vu16 *args, vu16 *reply);
 void aac_task_step(void);
 void aac_task_main(void);
+#ifdef OPENDSP_CODEC_BANKS
+u16 aac_stream_busy(void);
+#endif

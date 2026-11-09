@@ -34,12 +34,12 @@ static Result arm_refill(audio_codec *c)
     memmove(a->input, a->input + a->offset, left);
     a->length = left;
     a->offset = 0;
-    long at = ftell(c->in.file);
-    if (at < 0 || (u64)at > a->end)
+    u64 at = opendsp_audio_input_tell(&c->in);
+    if (at > a->end)
         return OPENDSP_AUDIO_ERR_IO;
     size_t count = sizeof(a->input) - left, got = 0;
-    if (count > a->end - (u64)at)
-        count = (size_t)(a->end - (u64)at);
+    if (count > a->end - at)
+        count = (size_t)(a->end - at);
     Result r = opendsp_audio_input_read(&c->in, a->input + left, count, &got);
     a->length += got;
     if (R_FAILED(r))
@@ -52,10 +52,7 @@ static Result arm_frame(audio_codec *c, bool probe, s16 *out)
     for (;;) {
         if (opendsp_audio_input_cancelled(&c->in))
             return OPENDSP_AUDIO_ERR_BUSY;
-        long at = ftell(c->in.file);
-        if (at < 0)
-            return OPENDSP_AUDIO_ERR_IO;
-        bool eof = (u64)at == a->end;
+        bool eof = opendsp_audio_input_tell(&c->in) == a->end;
         if (a->offset == a->length && eof) {
             a->frames = a->pcm_offset = 0;
             if (!probe) {

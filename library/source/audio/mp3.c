@@ -234,7 +234,7 @@ Result opendsp_audio_mp3_open(audio_codec *c, u32 backend, u32 count, u32 frames
         return r;
     c->backend = OPENDSP_MP3_BACKEND_DSP;
     c->direct_pcm = mp3_backend_stream_pcm(m->decoder, &c->direct_stride);
-    c->memory = sizeof(*m) + mp3_backend_stream_overhead(); /* borrowed PCM counted by output.bytes */
+    c->memory = sizeof(*m) + mp3_backend_stream_overhead(m->decoder); /* PCM counted by output.bytes */
     u64 deadline = svcGetSystemTick() + (u64)SYSCLOCK_ARM11;
     for (;;) {
         mp3_stream_progress p;

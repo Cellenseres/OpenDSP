@@ -26,13 +26,29 @@
 #define DMA_CFG2       MMIO(0x1DC)
 #define DMA_CTRL       MMIO(0x1DE)
 
+#ifdef DMA_DECODER_PAGE
+#define READ_AHBM  0
+#define READ_DMA   4
+#define WRITE_AHBM 1
+#define WRITE_DMA  5
+#define DATA_PAGE  1
+#define AHBM_WAIT  0xF
+#define AHBM_DONE  0xF
+#else
 #define READ_AHBM  2
 #define READ_DMA   2
 #define WRITE_AHBM 1
 #define WRITE_DMA  3
+#define DATA_PAGE  0
+#define AHBM_WAIT  0xC
+#define AHBM_DONE  0x4
+#endif
 
 #define BURST_BYTES   32u
-#define STAGING_BYTES 2688u
+#ifndef DMA_STAGING_BYTES
+#define DMA_STAGING_BYTES 2688u
+#endif
+#define STAGING_BYTES DMA_STAGING_BYTES
 #define CHUNK_BYTES   (STAGING_BYTES - 2 * BURST_BYTES)
 #define SPIN_LIMIT    30000u
 
@@ -65,7 +81,7 @@ static void wait_channel(u16 ch)
         stuck_channels |= bit;
     else
         stuck_channels &= (u16)~bit;
-    wait_ahbm(0x4);
+    wait_ahbm(AHBM_DONE);
 }
 
 void dma_quiesce(void)
@@ -84,7 +100,7 @@ void dma_quiesce(void)
 static void setup_channel(u16 ch, u16 src_step, u16 dst_step)
 {
     DMA_CHAN = ch;
-    DMA_DST_HI = 0;
+    DMA_DST_HI = DATA_PAGE;
     DMA_SIZE2 = 0;
     DMA_SSTEP0 = src_step;
     DMA_DSTEP0 = dst_step;
@@ -125,7 +141,7 @@ static const u16 *fetch_blocks(u32 address, u16 bytes)
     u16 bursts = (u16)((u16)(lead + bytes + (u16)(BURST_BYTES - 1)) >> 5);
     if (!initialized)
         dma_init();
-    wait_ahbm(0xC);
+    wait_ahbm(AHBM_WAIT);
     DMA_CHAN = READ_DMA;
     DMA_CTRL = 0x8000;
     DMA_SRC_LO = (u16)(lo - lead);
@@ -155,11 +171,13 @@ void dma_write(u16 src, u16 words, u32 address)
         return;
     if (!initialized)
         dma_init();
-    wait_ahbm(0xC);
+    wait_ahbm(AHBM_WAIT);
+    // Both DMA copies share this bridge.
+    AHBM_DMAMAP(WRITE_AHBM) = 1u << WRITE_DMA;
     DMA_CHAN = WRITE_DMA;
     DMA_CTRL = 0x8000;
     DMA_SRC_LO = src;
-    DMA_SRC_HI = 0;
+    DMA_SRC_HI = DATA_PAGE;
     DMA_DST_LO = (u16)address;
     DMA_DST_HI = (u16)(address >> 16);
     DMA_SIZE0 = words;

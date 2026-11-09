@@ -10,12 +10,19 @@ PREFIX    := $(DEVKITARM)/bin/arm-none-eabi-
 CC        := $(PREFIX)gcc
 AR        := $(PREFIX)gcc-ar
 
-FIRMWARE  := ../firmware/opendsp.cdc
+CODEC_BANKS ?= ../firmware/banked
+ifneq ($(strip $(CODEC_BANKS)),)
+FIRMWARE  ?= $(CODEC_BANKS)/opendsp.cdc
+endif
+FIRMWARE  ?= ../firmware/opendsp.cdc
 MP3_TABLES ?= ../firmware/mp3_tables.bin
 ARCH      := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 CFLAGS    := -O2 -Wall -Wextra $(ARCH) -mword-relocations -ffunction-sections -fdata-sections \
              -D__3DS__ -Iinclude -I../firmware -I$(DEVKITPRO)/libctru/include
 INSTALL   := $(DEVKITPRO)/portlibs/3ds
+include ../third_party/audio-codecs.mk
+CFLAGS += $(AUDIO_CODEC_INCLUDES)
+CODEC_OBJECTS := $(addprefix build/third_party/,$(AUDIO_CODEC_SOURCES:.c=.o))
 
 all: lib/libopendsp.a
 
@@ -24,7 +31,31 @@ build/%.o: source/%.c $(wildcard include/*.h include/opendsp/*.h source/*.h) ../
 	$(CC) $(CFLAGS) -c $< -o $@
 
 AAC_OBJECTS := build/aac_api.o build/aac_dsp.o build/mp3_api.o build/mp3_arm11.o $(addprefix build/aac/,decoder.o syntax.o spectrum.o filterbank.o tables.o)
-AUDIO_OBJECTS := $(addprefix build/audio/,input.o codec.o wav.o aac.o mp3.o mp3_arm11.o output.o engine.o)
+ifneq ($(strip $(CODEC_BANKS)),)
+CFLAGS += -DOPENDSP_CODEC_BANKS=1 -I$(CODEC_BANKS)
+BANK_ASFLAGS := -DOPENDSP_CODEC_BANKS=1 -Wa,-I,$(CODEC_BANKS)
+AAC_OBJECTS += build/codec_banks_backend.o
+build/codec_banks_backend.o: $(CODEC_BANKS)/codec_banks.h ../firmware/codec_banks_protocol.h
+build/aac_dsp.o: $(CODEC_BANKS)/codec_banks.h
+build/aac_dsp.o: source/ogg_backend.inc ../firmware/ogg_protocol.h
+build/firmware.o: $(CODEC_BANKS)/codec_banks.bin
+endif
+build/codec-banks.config: FORCE
+	@mkdir -p build
+	@printf '%s\n' '$(CODEC_BANKS)' '$(FIRMWARE)' '$(MP3_TABLES)' > $@.tmp
+	@cmp -s $@.tmp $@ || cp $@.tmp $@
+	@rm -f $@.tmp
+
+build/aac_dsp.o build/firmware.o build/audio/codec.o build/audio/ogg.o build/audio/vorbis.o build/audio/opus.o: build/codec-banks.config
+AUDIO_OBJECTS := $(addprefix build/audio/,input.o codec.o wav.o aac.o mp3.o mp3_arm11.o ogg.o ogg_alloc.o vorbis.o opus.o output.o engine.o)
+
+build/third_party/%.o: ../third_party/%.c ../third_party/opendsp_alloc.h ../third_party/audio-codecs.mk ../third_party/config/ogg/config_types.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(AUDIO_CODEC_FLAGS) -MMD -MP -fstack-usage -fno-strict-aliasing -Wno-unused-parameter -Wno-sign-compare -c $< -o $@
+
+build/audio/ogg.o build/audio/ogg_alloc.o build/audio/vorbis.o build/audio/opus.o: ../third_party/opendsp_alloc.h
+build/audio/vorbis.o: ../third_party/tremor/ivorbisfile.h
+build/audio/ogg.o build/audio/ogg_alloc.o build/audio/vorbis.o build/audio/opus.o: CFLAGS += -fstack-usage
 
 build/mp3_arm11.o: ../firmware/mp3/decoder.c ../firmware/mp3/decoder.h ../firmware/mp3/math.inc ../firmware/mp3/hybrid.inc ../firmware/mp3/tables.h ../firmware/hw.h
 build/mp3_arm11.o: CFLAGS += -fno-strict-aliasing
@@ -44,9 +75,9 @@ $(MP3_TABLES): ../tools/mp3_blob.py ../firmware/mp3/tables.h ../firmware/mp3/hyb
 
 build/firmware.o: source/firmware.s $(FIRMWARE) ../firmware/aac_tables.bin $(MP3_TABLES)
 	@mkdir -p build
-	$(CC) $(ARCH) -x assembler-with-cpp -Wa,-I,$(dir $(FIRMWARE)) -Wa,-I,$(dir $(MP3_TABLES)) -c $< -o $@
+	$(CC) $(ARCH) -x assembler-with-cpp -Wa,-I,$(dir $(FIRMWARE)) $(BANK_ASFLAGS) -Wa,-I,$(dir $(MP3_TABLES)) -c source/firmware.s -o $@
 
-lib/libopendsp.a: build/opendsp.o build/embedded.o build/firmware.o build/mailbox.o build/codec_events.o build/effects.o $(AAC_OBJECTS) $(AUDIO_OBJECTS)
+lib/libopendsp.a: build/opendsp.o build/embedded.o build/firmware.o build/mailbox.o build/codec_events.o build/effects.o $(AAC_OBJECTS) $(AUDIO_OBJECTS) $(CODEC_OBJECTS)
 	@mkdir -p lib
 	rm -f $@
 	$(AR) rcs $@ $^
@@ -60,4 +91,7 @@ install: lib/libopendsp.a
 clean:
 	rm -rf build lib
 
-.PHONY: all install clean
+.PHONY: all install clean FORCE
+FORCE:
+
+-include $(CODEC_OBJECTS:.o=.d)

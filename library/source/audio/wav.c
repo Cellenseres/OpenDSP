@@ -125,6 +125,7 @@ Result opendsp_audio_wav_open(audio_codec *c)
     c->ops = &wav_ops;
     c->info.format = OPENDSP_AUDIO_WAV;
     c->info.duration_known = true;
+    c->seekable = true;
     c->info.total_frames = w.bytes / w.frame_bytes;
     return wav_seek(c, 0);
 }

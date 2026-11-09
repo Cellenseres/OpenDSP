@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: BSD-2-Clause
+#pragma once
+#include "hw.h"
+
+#define OGG_DECODE_WORD 0x7000
+#define OGG_OVERLAY_WORD 0x7020
+#define OGG_OVERLAY_CONFIG 0x7028
+#define OGG_OVERLAY_DIRECTORY 0x7040
+#define OGG_TASK_TOP 0x6fff
+#define OGG_TASK_GUARD 0x4600
+#define OGG_PCM_GUARD 0x2d60
+#define OGG_PACKET_WORD 0xfa00
+#define OGG_PACKET_BYTES 1276
+
+enum {
+    OGG_TASK_STATUS, OGG_TASK_OPERATION, OGG_TASK_CHANNELS,
+    OGG_TASK_GAIN, OGG_TASK_FRAMES, OGG_TASK_FEC, OGG_TASK_BYTES,
+    OGG_TASK_PACKET, OGG_TASK_INPUT_BEGIN = 9, OGG_TASK_INPUT_END = 11,
+    OGG_TASK_PCM = 13, OGG_TASK_PCM_END = 15, OGG_TASK_RESULT = 17,
+    OGG_TASK_DECODED, OGG_TASK_DURATION, OGG_TASK_RANGE,
+    OGG_TASK_ERROR = 22, OGG_TASK_CODEC, OGG_TASK_GRANULE
+};
+#define OGG_TASK_WAITING 1
+#define OGG_TASK_RUNNING 2
+#define OGG_TASK_COMPLETE 3
+
+void ogg_opus_resume(void);
+void ogg_opus_pause(void);
+void ogg_opus_gain(s16 *pcm, u16 samples, s16 gain);
+u16 ogg_stream_quiesce(void);

@@ -11,6 +11,10 @@
 #include "stats.h"
 #include "mp3/decoder.h"
 #include "mp3_protocol.h"
+#ifdef OPENDSP_CODEC_BANKS
+#include "ogg/banks.h"
+#include "ogg/stream.h"
+#endif
 
 #define TASK_SP (*(vu16 *)0x0F80)
 #define TASK_TOP (*(vu16 *)0x0F83)
@@ -86,11 +90,16 @@ static __attribute__((noinline)) void mp3_codec_yield_slow(void)
 }
 
 u16 mp3_slice_ready(const u32 *deadline, const volatile u16 *due);
+#ifdef OPENDSP_CODEC_BANKS
+void output_kick(void);     // ogg/task.s, paged IRQ entry
+#else
+#define output_kick output_poll
+#endif
 void mp3_codec_yield(void)
 {
     // keep the FIFO full between yields
     if (!(BTDMP0_TX_STAT & BTDMP_TX_FULL))
-        output_poll();
+        output_kick();
     if (mp3_yield_fast && mp3_slice_ready(&mp3_yield_deadline, &frames_due))
         return;
     mp3_codec_yield_slow();
@@ -129,6 +138,9 @@ static void configure(void)
 
 void aac_stream_init(void)
 {
+#ifdef OPENDSP_CODEC_BANKS
+    ogg_stream_cancel();
+#endif
     arena = 0;
     active = 0;
     TASK_SP = 0;
@@ -164,11 +176,25 @@ static void restart(u16 counters, u16 preserve_playback)
     last_frame = aac_timer_now();
 }
 
+#ifdef OPENDSP_CODEC_BANKS
+u16 aac_stream_busy(void)
+{
+    return arena != 0;
+}
+#endif
+
 u16 aac_stream_command(u16 command, vu16 *args, vu16 *reply)
 {
     u16 byte_stream = command == MP3_CMD_STREAM_OPEN;
     u16 requested = command >= MP3_CMD_OPEN && command <= MP3_CMD_STREAM_OPEN;
     u32 shared = requested ? MP3_SHARED_BYTES : AAC_SHARED_BYTES;
+#ifdef OPENDSP_CODEC_BANKS
+    if ((command == AAC_CMD_OPEN || command == MP3_CMD_OPEN || byte_stream) && ogg_stream_busy())
+        return EXT_ERR_ARGUMENT;
+    if ((command == AAC_CMD_OPEN || command == MP3_CMD_OPEN || byte_stream) &&
+        !codec_bank_ready(requested ? CODEC_MP3_BANK : CODEC_AAC_BANK))
+        return EXT_ERR_UNSUPPORTED;
+#endif
     if (byte_stream)
         command = AAC_CMD_OPEN;
     else if (requested)

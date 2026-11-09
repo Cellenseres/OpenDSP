@@ -133,6 +133,15 @@ u32 opendspAacGetBackend(const opendspAacDecoder *dec)
     return dec ? dec->backend : OPENDSP_AAC_BACKEND_AUTO;
 }
 
+u32 opendsp_aac_memory(const opendspAacDecoder *dec)
+{
+    if (!dec) return 0;
+#ifdef __3DS__
+    if (dec->dsp) return sizeof(*dec) + aac_backend_memory(dec->dsp);
+#endif
+    return sizeof(*dec) + sizeof(*dec->core);
+}
+
 Result opendspAacGetStats(opendspAacDecoder *dec, opendspAacStats *stats)
 {
     if (!dec || !stats || stats->struct_size != sizeof(*stats))

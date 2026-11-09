@@ -12,6 +12,8 @@ Result aac_backend_decode(aac_dsp_backend *d, const void *input, size_t bytes, s
 void aac_backend_reset(aac_dsp_backend *d);
 void aac_backend_close(aac_dsp_backend *d);
 Result aac_backend_stats(aac_dsp_backend *d, opendspAacStats *stats);
+u32 aac_backend_memory(const aac_dsp_backend *d);
+u32 opendsp_aac_memory(const opendspAacDecoder *decoder);
 Result mp3_backend_stages(aac_dsp_backend *d, u32 ticks[6]);
 void opendsp_aac_setup(void);
 void opendsp_aac_release(void);
@@ -31,6 +33,6 @@ Result mp3_backend_stream_result(aac_dsp_backend *d, u16 ticket, u16 *frames);
 void mp3_backend_stream_commit(aac_dsp_backend *d);
 void mp3_backend_stream_played(aac_dsp_backend *d, u16 count);
 void *mp3_backend_stream_pcm(aac_dsp_backend *d, u32 *stride);
-u32 mp3_backend_stream_overhead(void);
+u32 mp3_backend_stream_overhead(const aac_dsp_backend *d);
 Result mp3_backend_stream_reset(aac_dsp_backend *d, bool preserve_output);
 void mp3_backend_stream_stop(aac_dsp_backend *d);

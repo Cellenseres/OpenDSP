@@ -51,7 +51,7 @@ static u32 play_position[NUM_SOURCES];
 static s16 voice_out[2 * FRAME_SAMPLES];
 static wavebuf_t new_buffer;
 static u16 gains_stale;
-static u16 saved_voice[SLEEP_SOURCE_WORDS];
+static u16 saved_voice[SLEEP_SOURCE_WORDS] YMEM_BSS;
 
 static vu16 *snapshot_word(u16 logical)
 {

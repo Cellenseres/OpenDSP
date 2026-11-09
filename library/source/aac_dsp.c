@@ -8,28 +8,43 @@
 #include "mp3_protocol.h"
 #include "opendsp.h"
 #include "codec_events.h"
+#ifdef OPENDSP_CODEC_BANKS
+#include "codec_banks_backend.h"
+#include "codec_banks_protocol.h"
+#include "ogg_protocol.h"
+#include "ogg_backend.h"
+#include "opendsp/audio.h"
+#endif
 
 #ifndef OPENDSP_AAC_WAIT_MS
 #define OPENDSP_AAC_WAIT_MS 250
 #endif
 
 struct aac_dsp_backend {
+#ifdef OPENDSP_CODEC_BANKS
+    codec_bank_pool banks;
+    u16 ogg_channels;
+    bool ogg_events; // wait for DONE_WORD events
+#endif
     u8 *memory;
     volatile u16 *metadata;
     u16 sequence, session;
     u16 codec;
     u16 stream_count, stream_frames, input_write, stream_completed;
     u16 played_ack, control_sequence;
-    u32 epoch, generation;
+    u32 epoch, generation, wakeups;
     bool connected, changed, faulted, ever_connected, discontinuity, reset_requested, stopped,
         preserve_output, input_eof, profile;
+    opendspAacStats stats_cache; // last monitor answer
+    bool stats_valid;
+    volatile bool stats_wanted;
 };
 extern const u16 opendsp_aac_tables[AAC_TABLE_WORDS];
 extern const u16 opendsp_mp3_tables[MP3_TABLE_WORDS];
-static LightLock owner_lock;
+static LightLock owner_lock, stats_lock;
 static bool setup, sleeping;
 static u32 frame_requests;
-static u32 epoch;
+static u32 epoch, wakeups;
 static bool sleeping_now(void) { return __atomic_load_n(&sleeping, __ATOMIC_SEQ_CST); }
 static u32 power_epoch(void) { return __atomic_load_n(&epoch, __ATOMIC_ACQUIRE); }
 static u32 dsp_generation;
@@ -43,9 +58,15 @@ static aac_dsp_backend *owner;
 static void *quarantined;
 static u32 quarantine_epoch;
 static Result codec_backend_allocate(aac_dsp_backend **out, u16 codec, u16 count, u16 frames, bool profile);
+#ifdef OPENDSP_CODEC_BANKS
+static Result ogg_connect_stream(aac_dsp_backend *d, u32 capabilities);
+#endif
 
 static unsigned shared_bytes(const aac_dsp_backend *d)
 {
+#ifdef OPENDSP_CODEC_BANKS
+    if (d->codec >= 3) return OGG_INPUT_BYTES + OGG_PCM_BYTES;
+#endif
     if (d->codec == 2)
         return MP3_STREAM_PCM + d->stream_count * ((d->stream_frames * 4u + 31) & ~31u);
     return d->codec ? MP3_SHARED_BYTES : AAC_SHARED_BYTES;
@@ -54,8 +75,20 @@ static unsigned pcm_bytes(const aac_dsp_backend *d)
 {
     return d->codec ? MP3_PCM_BYTES : AAC_PCM_BYTES;
 }
+
+u32 aac_backend_memory(const aac_dsp_backend *d)
+{
+    u32 allocation = shared_bytes(d);
+#ifdef OPENDSP_CODEC_BANKS
+    if (d->banks.offset) allocation = d->banks.offset + codec_banks_size(CODEC_CAP_BANKS);
+#endif
+    return sizeof(*d) + allocation;
+}
 static u16 codec_command(const aac_dsp_backend *d, u16 command)
 {
+#ifdef OPENDSP_CODEC_BANKS
+    if (d->codec >= 3) return command == AAC_CMD_CLOSE ? OGG_CMD_CLOSE : OGG_CMD_STATS;
+#endif
     return command + (d->codec ? MP3_CMD_OPEN - AAC_CMD_OPEN : 0);
 }
 
@@ -74,6 +107,7 @@ static void power_hook(DSP_HookType type)
 
 void opendsp_aac_wakeup(bool restored)
 {
+    __atomic_add_fetch(&wakeups, 1, __ATOMIC_RELEASE);
     if (!restored) {
         __atomic_add_fetch(&epoch, 1, __ATOMIC_RELEASE);
         __atomic_add_fetch(&dsp_generation, 1, __ATOMIC_RELEASE);
@@ -85,6 +119,7 @@ void opendsp_aac_setup(void)
 {
     if (!setup) {
         LightLock_Init(&owner_lock);
+        LightLock_Init(&stats_lock);
         dspHook(&hook, power_hook);
         setup = true;
     }
@@ -142,12 +177,25 @@ static Result connect_stream(aac_dsp_backend *d)
     const u16 *tables = d->codec ? opendsp_mp3_tables : opendsp_aac_tables;
     if (!opendsp_running || sleeping_now())
         return OPENDSP_AAC_ERR_BACKEND;
-    if (R_FAILED(opendspGetCapabilities(&caps)) || !(caps & (d->codec ? MP3_CAP_DSP : AAC_CAP_DSP)))
+    if (R_FAILED(opendspGetCapabilities(&caps)))
+        return OPENDSP_AAC_ERR_BACKEND;
+#ifdef OPENDSP_CODEC_BANKS
+    if (d->codec >= 3) return ogg_connect_stream(d, caps);
+#endif
+    if (!(caps & (d->codec ? MP3_CAP_DSP : AAC_CAP_DSP)))
         return OPENDSP_AAC_ERR_BACKEND;
     if (d->codec && !(caps & MP3_CAP_STREAM))
         return OPENDSP_MP3_ERR_BACKEND;
-    if ((caps & MP3_CAP_STREAM) && R_FAILED(opendsp_codec_events_start()))
-        return OPENDSP_AAC_ERR_BACKEND;
+    if (caps & MP3_CAP_STREAM) {
+        rc = opendsp_codec_events_start();
+        opendsp_codec_error("DSP notification setup", rc);
+        if (R_FAILED(rc)) return OPENDSP_AAC_ERR_BACKEND;
+    }
+#ifdef OPENDSP_CODEC_BANKS
+    if (!d->banks.token) d->banks.token = new_session();
+    rc = codec_banks_connect(&d->banks, d->memory, caps, d->codec);
+    if (R_FAILED(rc)) return OPENDSP_AAC_ERR_BACKEND;
+#endif
     if (d->codec == 2) {
         u32 metadata_address;
         if (R_FAILED(DSP_ConvertProcessAddressFromDspDram(MP3_STREAM_META_WORD, &metadata_address)))
@@ -198,6 +246,7 @@ static Result connect_stream(aac_dsp_backend *d)
     memcpy((void *)address, tables, words * 2);
     __dsb();
     d->epoch = power_epoch();
+    d->wakeups = __atomic_load_n(&wakeups, __ATOMIC_ACQUIRE);
     d->generation = current_generation();
     d->stopped = false;
     d->faulted = false;
@@ -231,7 +280,13 @@ static Result codec_backend_allocate(aac_dsp_backend **out, u16 codec, u16 count
 {
     Result rc;
     aac_dsp_backend *d;
-    if (!out || codec > 2)
+    if (!out || codec >
+#ifdef OPENDSP_CODEC_BANKS
+        4
+#else
+        2
+#endif
+    )
         return OPENDSP_AAC_ERR_INVALID_ARG;
     *out = NULL;
     opendsp_aac_setup();
@@ -241,6 +296,7 @@ static Result codec_backend_allocate(aac_dsp_backend **out, u16 codec, u16 count
         quarantined = NULL;
     }
     if (owner || quarantined) {
+        opendsp_codec_error(owner ? "DSP owner busy" : "DSP arena quarantined", OPENDSP_AAC_ERR_BUSY);
         LightLock_Unlock(&owner_lock);
         return OPENDSP_AAC_ERR_BUSY;
     }
@@ -253,7 +309,25 @@ static Result codec_backend_allocate(aac_dsp_backend **out, u16 codec, u16 count
     d->profile = profile;
     d->stream_count = count;
     d->stream_frames = frames;
-    d->memory = linearMemAlign(shared_bytes(d), 0x80);
+#ifdef OPENDSP_CODEC_BANKS
+    if (codec >= 3) d->ogg_channels = count;
+#endif
+    u32 allocation = shared_bytes(d);
+#ifdef OPENDSP_CODEC_BANKS
+    u32 capabilities = 0;
+    rc = opendspGetCapabilities(&capabilities);
+    if (R_FAILED(rc)) {
+        free(d);
+        LightLock_Unlock(&owner_lock);
+        return OPENDSP_AAC_ERR_BACKEND;
+    }
+    u32 extra = codec_banks_size(capabilities);
+    if (extra) {
+        d->banks.offset = (allocation + 127) & ~127u;
+        allocation = d->banks.offset + extra;
+    }
+#endif
+    d->memory = linearMemAlign(allocation, 0x80);
     if (!d->memory) {
         free(d);
         LightLock_Unlock(&owner_lock);
@@ -261,9 +335,18 @@ static Result codec_backend_allocate(aac_dsp_backend **out, u16 codec, u16 count
     }
     rc = connect_stream(d);
     if (R_FAILED(rc)) {
+        opendsp_codec_error("DSP decoder open", rc);
         u16 args[1] = {d->session};
-        if (!d->connected ||
-            R_SUCCEEDED(opendsp_request(codec_command(d, AAC_CMD_CLOSE), args, 1, NULL, 0))) {
+        Result close_result = d->connected ? opendsp_request(codec_command(d, AAC_CMD_CLOSE), args, 1, NULL, 0) : 0;
+        opendsp_codec_error("DSP failed-open close", close_result);
+        bool closed = R_SUCCEEDED(close_result);
+#ifdef OPENDSP_CODEC_BANKS
+        if (closed) {
+            close_result = codec_banks_disconnect(&d->banks);
+            closed = R_SUCCEEDED(close_result);
+        }
+#endif
+        if (closed) {
             linearFree(d->memory);
         } else {
             quarantined = d->memory;
@@ -678,9 +761,9 @@ void *mp3_backend_stream_pcm(aac_dsp_backend *d, u32 *stride)
     *stride = (d->stream_frames * 4u + 31) & ~31u;
     return d->memory + MP3_STREAM_PCM;
 }
-u32 mp3_backend_stream_overhead(void)
+u32 mp3_backend_stream_overhead(const aac_dsp_backend *d)
 {
-    return MP3_STREAM_PCM + sizeof(aac_dsp_backend);
+    return aac_backend_memory(d) - d->stream_count * ((d->stream_frames * 4u + 31) & ~31u);
 }
 Result mp3_backend_stream_reset(aac_dsp_backend *d, bool preserve_output)
 {
@@ -718,9 +801,14 @@ void aac_backend_close(aac_dsp_backend *d)
     u16 args[1] = {d->session};
     if (!safe && !sleeping_now())
         safe = R_SUCCEEDED(opendsp_request(codec_command(d, AAC_CMD_CLOSE), args, 1, NULL, 0));
+#ifdef OPENDSP_CODEC_BANKS
+    if (safe && d->banks.connected && dspIsComponentLoaded() && d->generation == current_generation())
+        safe = !sleeping && R_SUCCEEDED(codec_banks_disconnect(&d->banks));
+#endif
     if (safe) {
         linearFree(d->memory);
     } else {
+        opendsp_codec_error("DSP close quarantined", OPENDSP_AAC_ERR_BUSY);
         // Keep the arena alive until DSP shutdown confirms DMA has stopped.
         quarantined = d->memory;
         quarantine_epoch = current_generation();
@@ -731,9 +819,9 @@ void aac_backend_close(aac_dsp_backend *d)
     LightLock_Unlock(&owner_lock);
 }
 
-Result aac_backend_stats(aac_dsp_backend *d, opendspAacStats *stats)
+// Caller holds owner_lock.
+static Result stats_query(aac_dsp_backend *d, opendspAacStats *stats)
 {
-    LightLock_Lock(&owner_lock);
     u16 args[2] = {d->session, 0}, r[16], slice[2];
     Result rc = opendsp_request(codec_command(d, AAC_CMD_STATS), args, 2, r, 16);
     if (R_FAILED(rc))
@@ -752,8 +840,46 @@ Result aac_backend_stats(aac_dsp_backend *d, opendspAacStats *stats)
         goto done;
     stats->worst_slice_ticks = (u32)slice[0] << 16 | slice[1];
 done:
-    LightLock_Unlock(&owner_lock);
     return rc;
+}
+
+static void stats_store(aac_dsp_backend *d, const opendspAacStats *stats)
+{
+    LightLock_Lock(&stats_lock);
+    d->stats_cache = *stats;
+    d->stats_valid = true;
+    LightLock_Unlock(&stats_lock);
+}
+
+// Decoder thread answers pending queries.
+static void stats_serve(aac_dsp_backend *d)
+{
+    if (!__atomic_exchange_n(&d->stats_wanted, false, __ATOMIC_ACQ_REL))
+        return;
+    opendspAacStats stats = {.struct_size = sizeof(stats)};
+    if (R_SUCCEEDED(stats_query(d, &stats)))
+        stats_store(d, &stats);
+}
+
+// Never waits behind a running decode.
+Result aac_backend_stats(aac_dsp_backend *d, opendspAacStats *stats)
+{
+    if (!LightLock_TryLock(&owner_lock)) {
+        Result rc = stats_query(d, stats);
+        LightLock_Unlock(&owner_lock);
+        if (R_SUCCEEDED(rc))
+            stats_store(d, stats);
+        return rc;
+    }
+    __atomic_store_n(&d->stats_wanted, true, __ATOMIC_RELEASE);
+    u32 size = stats->struct_size;
+    LightLock_Lock(&stats_lock);
+    bool valid = d->stats_valid;
+    if (valid)
+        *stats = d->stats_cache;
+    LightLock_Unlock(&stats_lock);
+    stats->struct_size = size;
+    return valid ? 0 : OPENDSP_AAC_ERR_BUSY;
 }
 
 Result mp3_backend_stages(aac_dsp_backend *d, u32 ticks[6])
@@ -767,3 +893,7 @@ Result mp3_backend_stages(aac_dsp_backend *d, u32 ticks[6])
     LightLock_Unlock(&owner_lock);
     return rc;
 }
+
+#ifdef OPENDSP_CODEC_BANKS
+#include "ogg_backend.inc"
+#endif

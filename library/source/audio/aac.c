@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "codec.h"
+#include "../aac_backend.h"
 
 #define AAC_INPUT_BYTES 8192
 #define AAC_PCM_FRAMES 4096
@@ -46,7 +47,7 @@ static Result aac_refill(audio_codec *c)
     if (R_FAILED(r))
         return r;
     a->length += got;
-    a->eof = feof(c->in.file);
+    a->eof = opendsp_audio_input_eof(&c->in);
     return !got && !a->eof ? OPENDSP_AUDIO_ERR_IO : 0;
 }
 
@@ -184,7 +185,7 @@ static Result aac_allocate(audio_codec *c, u32 backend)
     a->pcm_capacity = capacity;
     c->data = a;
     c->backend = backend;
-    c->memory = bytes + (backend == OPENDSP_AAC_BACKEND_DSP ? 24832 : 32768);
+    c->memory = bytes + opendsp_aac_memory(decoder);
     return 0;
 }
 

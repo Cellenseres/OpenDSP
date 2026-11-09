@@ -94,6 +94,12 @@ Result opendsp_request(u16 command, const u16 *args, u16 arg_count, u16 *reply, 
     return rc;
 }
 
+u16 opendsp_mailbox_peek(u16 word)
+{
+    vu16 *box = opendsp_running && word < EXT_WORDS ? find_mailbox() : NULL;
+    return box ? box[word] : 0;
+}
+
 Result opendspGetCapabilities(u32 *caps)
 {
     vu16 *box;

@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: BSD-2-Clause
+#pragma once
+
+#define CODEC_BANK_ABI 1
+#define CODEC_CAP_BANKS (1u << 7)
+#define CODEC_BANK_CONFIGURE 0x18
+#define CODEC_BANK_SELECT 0x19
+#define CODEC_BANK_STATUS 0x1a
+#define CODEC_BANK_CLOSE 0x1b
+#define CODEC_BANK_LIMIT 16
+#define CODEC_BANK_DESCRIPTOR_BYTES 8
+#define CODEC_BANK_CONFIG_WORDS 15
