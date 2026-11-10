@@ -62,6 +62,7 @@ that prevents the DSP effect from receiving its input.
 
 Check `opendspGetCapabilities()` if your app can run with another firmware.
 Effects, voices and AAC share the DSP; `opendspGetStats()` reports its load.
+`opendspGetLoad()` splits it into decoders and mixing with effects (firmware 1.3).
 
 ## Playing files
 

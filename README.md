@@ -35,11 +35,11 @@ Reverb and delay run on the DSP through ndsp's two aux buses. Include
 `<opendsp/effects.h>` to configure them. The [guide](docs/GUIDE.md#reverb-and-delay)
 has an example, and Sound Lab includes Room, Hall, Plate and Cave presets.
 
-## WAV, AAC and MP3
+## WAV, AAC, MP3 and Ogg
 
-Use `<opendsp/audio.h>` to stream WAV, AAC and MP3 with pause, looping and WAV seeking.
-It reads and buffers files in the background. See the [streaming guide](docs/STREAMING.md)
-and [example](examples/streaming).
+Use `<opendsp/audio.h>` to stream WAV, AAC, MP3, Ogg Vorbis and Ogg Opus with pause,
+looping and WAV/Ogg seeking. It reads and buffers files in the background. See the
+[streaming guide](docs/STREAMING.md) and [example](examples/streaming).
 
 AAC-LC uses the DSP by default. ARM11 is available for standalone decoding and
 formats outside the DSP's limits. If you only need the decoder, use
@@ -49,9 +49,13 @@ MP3 runs on DSP by default, with ARM11 available explicitly. Both support
 MPEG-1 Layer III up to 320 kbit/s. Use `<opendsp/mp3.h>` for raw-frame decoding;
 [MP3.md](docs/MP3.md) covers formats and API use.
 
+Vorbis and Opus decode on the DSP for most music, with ARM11 for the rest.
+Loop tags (LOOPSTART/LOOPEND) work for both. [OGG.md](docs/OGG.md) covers
+formats, backends and loops.
+
 ## Sound Lab
 
-[Sound Lab](examples/soundlab) lets you try music, sound effects, WAV/AAC/MP3 files,
+[Sound Lab](examples/soundlab) lets you try music, sound effects, WAV/AAC/MP3/Ogg files,
 filters and effects. The live monitor shows DSP load and the active decoder. Put your music in
 `sdmc:/3ds/opendsp-lab/` and press X in the player to switch decoders.
 
@@ -64,6 +68,7 @@ see [BUILDING.md](docs/BUILDING.md) if you want to change it.
 ## License
 
 BSD 2-Clause. Include the copyright notice and license text when distributing OpenDSP.
+The bundled Ogg codecs keep their BSD-style licenses; see [third_party](third_party/README.md).
 
 Made by Cellenseres. Thanks to Gericom for teak-llvm, wwylele for teakra,
 and the devkitPro and libctru developers.
