@@ -8,6 +8,7 @@
 #include "audio.h"
 #include "wav.h"
 #include "gfx.h"
+#include "cpu.h"
 #include "monitor.h"
 #include <opendsp.h>
 #include <opendsp/aac.h>
@@ -120,24 +121,30 @@ static void draw_wav(void)
         item(3, cursor[page] == 0, "Rescan SD card", "");
         line(7, "  No audio files found.");
         line(9, C_DIM "  SD:/3ds/opendsp-lab/");
-        line(10, C_DIM "  WAV, AAC or MP3");
+        line(10, C_DIM "  WAV, AAC, MP3, Ogg Vorbis/Opus");
         hints(" A rescan   B back");
         return;
     }
-    items = 3 + wav_count();
+    items = 5 + wav_count();
     item(3, cursor[page] == 0, "Stop", "");
     item(4, cursor[page] == 1, "Loop", on_off(wav_loop()));
-    item(5, cursor[page] == 2, "Rescan SD card", "");
-    line(6, C_DIM "  Decoder: %s", wav_backend() == OPENDSP_AAC_BACKEND_DSP ? "DSP" : "ARM11");
-    int first = cursor[page] - 9;
+    item(5, cursor[page] == 2, "Pause / resume", "");
+    item(6, cursor[page] == 3, "Jump halfway", "");
+    item(7, cursor[page] == 4, "Rescan SD card", "");
+    unsigned backend = wav_active_backend();
+    if (backend == OPENDSP_AAC_BACKEND_AUTO)
+        backend = wav_backend();
+    line(8, C_DIM "  Decoder: %s (X)", backend == OPENDSP_AAC_BACKEND_DSP ? "DSP"
+                                       : backend == OPENDSP_AAC_BACKEND_ARM11 ? "ARM11" : "AUTO");
+    int first = cursor[page] - 10;
     if (first < 0)
         first = 0;
-    for (int row = 0; row < 13; row++) {
+    for (int row = 0; row < 11; row++) {
         int index = first + row;
         if (index < wav_count())
-            item(7 + row, cursor[page] == 3 + index, wav_name(index), "");
+            item(9 + row, cursor[page] == 5 + index, wav_name(index), "");
         else
-            line(7 + row, "");
+            line(9 + row, "");
     }
     float progress = wav_progress();
     if (wav_playing()) {
@@ -146,43 +153,81 @@ static void draw_wav(void)
         else
             line(21, "  %s", wav_status());
         line(22, "  %s", wav_info());
-        opendspAudioStats stats = {.struct_size = sizeof(stats)};
-        if (wav_stats(&stats))
-            line(24, "  Underruns  " C_VAL "%lu", (unsigned long)stats.underruns);
+        line(23, "  Source frame " C_VAL "%llu", (unsigned long long)wav_position());
+        opendspAudioLoopInfo loop = {.struct_size = sizeof(loop)};
+        if (wav_loop_info(&loop) && loop.available) {
+            line(25, "  %s start %llu", loop.from_tags ? "Tag" : "API", (unsigned long long)loop.start_frame);
+            line(26, "  End %llu (exclusive)", (unsigned long long)loop.end_frame);
+        } else {
+            line(25, C_DIM "  Loop range: %s", loop.status == OPENDSP_AUDIO_LOOP_INVALID ? "invalid tags" : "whole file");
+        }
     } else {
         line(21, "  %s", wav_status());
         line(22, C_WARN "  %.36s", wav_error());
     }
+    opendspAudioStats stats = {.struct_size = sizeof(stats)};
+    if (wav_stats(&stats)) {
+        line(20, C_DIM "  Worker peak %.2f ms", (double)stats.peak_worker_ticks * 1000 / SYSCLOCK_ARM11);
+        line(24, "  Underruns " C_VAL "%lu" C_RESET "  Queue %lu fr", (unsigned long)stats.underruns,
+             (unsigned long)stats.queued_frames);
+    } else {
+        line(20, C_DIM "  Worker peak --");
+        line(24, C_DIM "  Underruns --  Queue --");
+    }
     hints(" A play  X decoder  Y monitor  B back");
+}
+
+static void percent(char *text, size_t size, float value)
+{
+    if (value >= 0)
+        snprintf(text, size, "%5.1f%%", value * 100);
+    else
+        snprintf(text, size, "   --");
 }
 
 static void draw_monitor(void)
 {
     const monitor_view *m = monitor_get();
+    char a[16], b[16];
     header("Live monitor");
     items = 0;
     line(3, "  Decoder     " C_VAL "%s", monitor_backend());
-    if (m->have_dsp) {
-        line(6, "  DSP load    " C_VAL "%.1f%%", m->dsp.load * 100);
-        line(7, "  Peak        " C_VAL "%.1f%%", m->dsp.load_max * 100);
-    } else {
-        line(6, "  DSP load    " C_DIM "--");
-        line(7, "  Peak        " C_DIM "--");
-    }
-    if (m->arm_decode >= 0)
-        line(10, "  CPU decode  " C_VAL "%.1f%%", m->arm_decode * 100);
-    else
-        line(10, "  CPU decode  " C_DIM "%s",
-             m->have_stream && m->backend == OPENDSP_AAC_BACKEND_DSP ? "Inactive" : "--");
-    line(11, C_DIM "  Estimated decoder load only");
+    percent(a, sizeof(a), m->value[SERIES_DSP_TOTAL]);
+    percent(b, sizeof(b), monitor_peak(SERIES_DSP_TOTAL));
+    line(5, "  DSP total   " C_VAL "%s" C_RESET "  peak %s", a, b);
+    percent(a, sizeof(a), m->value[SERIES_DSP_DECODE]);
+    percent(b, sizeof(b), m->value[SERIES_DSP_MIX]);
+    line(6, "  Decoder %s  Mix+FX %s", a, b);
+    if (m->loop_cached)
+        line(7, C_DIM "  Loop from memory, decoder idle");
+    else if (m->have_decoder)
+        line(7, "  Jobs %lu  Last " C_VAL "%.2f ms" C_RESET "  Err %lu", (unsigned long)m->decoder.frames,
+             (double)m->decoder.last_ticks * 2000 / SYSCLOCK_ARM11, (unsigned long)m->decoder.errors);
+    else if (!m->have_load)
+        line(7, C_DIM "  Split needs firmware 1.3");
+    percent(a, sizeof(a), m->value[SERIES_CPU_TOTAL]);
+    percent(b, sizeof(b), monitor_peak(SERIES_CPU_TOTAL));
+    line(9, "  CPU core 0  " C_VAL "%s" C_RESET "  peak %s", a, b);
+    percent(a, sizeof(a), m->value[SERIES_CPU_DECODE]);
+    percent(b, sizeof(b), m->value[SERIES_SD_READ]);
+    line(10, "  Decoder %s  SD wait %s", a, b);
+    line(11, C_DIM "  Core 0: time an idle thread missed");
     if (m->have_stream) {
-        line(14, "  Queued      " C_VAL "%lu buffers", (unsigned long)m->stream.queued_buffers);
-        line(15, "  Underruns   " C_VAL "%lu", (unsigned long)m->stream.underruns);
+        line(13, "  Queue " C_VAL "%lu / %lu frames", (unsigned long)m->stream.queued_frames,
+             (unsigned long)m->stream.capacity_frames);
+        line(14, "  Buffers %lu  Min %lu frames", (unsigned long)m->stream.queued_buffers,
+             (unsigned long)m->stream.min_queued_frames);
+        line(15, "  Worker peak " C_VAL "%.2f ms", (double)m->stream.peak_worker_ticks * 1000 / SYSCLOCK_ARM11);
+        line(16, "  Underruns %lu  Rebuffers %lu", (unsigned long)m->stream.underruns,
+             (unsigned long)m->stream.rebuffers);
+        line(17, "  Loops %lu  Retries %lu", (unsigned long)m->stream.loops,
+             (unsigned long)m->stream.busy_retries);
     } else {
-        line(14, "  Queued      " C_DIM "--");
-        line(15, "  Underruns   " C_DIM "--");
+        line(13, "  Queued      " C_DIM "--");
+        line(14, "  Underruns   " C_DIM "--");
+        line(15, "  Worker peak " C_DIM "--");
     }
-    line(18, "  Playback    %s", wav_status());
+    line(20, "  Playback    %s", wav_status());
     if (m->held)
         line(21, C_DIM "  Display paused");
     line(24, C_DIM "  Decoder changes restart playback.");
@@ -341,7 +386,7 @@ static void draw_lab(void)
     int active = 0;
     for (int ch = 0; ch < 24; ch++)
         active += ndspChnIsPlaying(ch);
-    opendspStats st = {sizeof st};
+    opendspStats st = {.struct_size = sizeof st};
     bool have_stats = R_SUCCEEDED(opendspGetStats(&st, false));
     line(10, "  Voices      " C_VAL "%d / 24", active);
     if (have_stats) {
@@ -359,6 +404,9 @@ static void draw_about(void)
     line(4, "  " C_OK "OpenDSP Sound Lab");
     line(6, C_DIM "  Nintendo 3DS audio firmware");
     line(10, "  Version " APP_VERSION);
+#ifdef OPENDSP_CODEC_BANKS
+    line(11, C_DIM "  DSP: AAC MP3 Vorbis Opus");
+#endif
     line(12, "  Cellenseres");
     line(14, C_DIM "  BSD 2-Clause");
     hints(" B back");
@@ -444,8 +492,13 @@ static void adjust_fx(int index, int delta, int big)
 static void go(int p)
 {
     page = p;
-    if (p == P_MONITOR)
+    // Idle thread only while the monitor shows.
+    if (p == P_MONITOR) {
         monitor_reset();
+        cpu_meter_start();
+    } else {
+        cpu_meter_stop();
+    }
     message[0] = 0;
     dirty = true;
 }
@@ -598,8 +651,13 @@ static void input(void)
             break;
         }
         if (down & KEY_X) {
-            wav_set_backend(wav_backend() == OPENDSP_AAC_BACKEND_DSP ? OPENDSP_AAC_BACKEND_ARM11
-                                                                     : OPENDSP_AAC_BACKEND_DSP);
+            unsigned active = wav_active_backend();
+            if (active == OPENDSP_AAC_BACKEND_AUTO)
+                active = wav_backend();
+            unsigned next = active == OPENDSP_AAC_BACKEND_DSP ? OPENDSP_AAC_BACKEND_ARM11
+                                                              : OPENDSP_AAC_BACKEND_DSP;
+            if (wav_set_backend(next, message, sizeof(message)))
+                message[0] = 0;
             dirty = true;
         }
         if (!wav_count()) {
@@ -615,14 +673,23 @@ static void input(void)
             if (*c == 0) {
                 wav_stop();
             } else if (*c == 1) {
-                wav_set_loop(!wav_loop());
-            } else if (*c == 2) {
+                if (wav_set_loop(!wav_loop(), message, sizeof(message)))
+                    message[0] = 0;
+            } else if (*c == 2 || *c == 3) {
+                char error[80];
+                bool ok = *c == 2 ? wav_pause_resume(error, sizeof(error))
+                                 : wav_seek_middle(error, sizeof(error));
+                if (!ok)
+                    snprintf(message, sizeof(message), "%.70s", error);
+                else
+                    message[0] = 0;
+            } else if (*c == 4) {
                 wav_stop();
                 wav_scan();
                 *c = 0;
             } else {
                 char error[80];
-                if (!wav_play(*c - 3, error, sizeof error))
+                if (!wav_play(*c - 5, error, sizeof error))
                     snprintf(message, sizeof message, "%.70s", error);
                 else
                     message[0] = 0;
@@ -771,7 +838,7 @@ static void draw_top(void)
     gfx_text(sx, cy + 17, "MUSIC", RGB(90, 200, 120), 1);
     gfx_text(sx + 6 * 16, cy + 17, "SFX", RGB(240, 200, 70), 1);
     gfx_text(sx + 12 * 16, cy + 17, "UI", RGB(200, 120, 255), 1);
-    gfx_text(sx + 13 * 16 + 4, cy + 17, "WAV", RGB(80, 170, 255), 1);
+    gfx_text(sx + 13 * 16, cy + 17, "FILE", RGB(80, 170, 255), 1);
     gfx_text(sx + 14 * 16 + 20, cy + 17, "KEYS", RGB(255, 120, 150), 1);
     gfx_text(sx + 18 * 16 + 12, cy + 17, "SPARE", RGB(160, 160, 190), 1);
 
@@ -845,6 +912,7 @@ int main(void)
         }
         gspWaitForVBlank();
     }
+    cpu_meter_stop();
     stop_all();
     wav_exit();
     audio_exit();

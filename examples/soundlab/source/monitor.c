@@ -3,12 +3,16 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "cpu.h"
 #include "gfx.h"
 #include "wav.h"
 #include "monitor.h"
 
 static monitor_view view;
-static u64 previous_tick, previous_decode;
+static opendspLoad previous_load;
+static u64 previous_tick, previous_decode, previous_read, previous_decoded;
+static u32 previous_idle;
+static bool previous_have_load, previous_cpu, previous_stream;
 static unsigned previous_backend;
 static opendspAudioFormat previous_format;
 static bool primed;
@@ -16,8 +20,8 @@ static bool primed;
 void monitor_reset(void)
 {
     memset(&view, 0, sizeof(view));
-    view.arm_decode = -1;
-    previous_tick = previous_decode = 0;
+    for (unsigned i = 0; i < MONITOR_SERIES; ++i)
+        view.value[i] = -1;
     primed = false;
 }
 void monitor_hold(void)
@@ -37,12 +41,33 @@ const monitor_view *monitor_get(void)
     return &view;
 }
 
+float monitor_peak(unsigned series)
+{
+    float peak = -1;
+    for (unsigned i = 0; i < view.count; ++i) {
+        float v = view.history[series][(view.head + MONITOR_HISTORY - 1 - i) % MONITOR_HISTORY];
+        if (isfinite(v) && v > peak)
+            peak = v;
+    }
+    return peak;
+}
+
 const char *monitor_backend(void)
 {
     if (!view.have_stream)
         return "None";
     if (view.info.format == OPENDSP_AUDIO_WAV)
         return "PCM";
+    if (view.info.format == OPENDSP_AUDIO_VORBIS) {
+        if (view.backend == OPENDSP_AAC_BACKEND_DSP)
+            return "VORBIS / DSP";
+        return view.backend == OPENDSP_AAC_BACKEND_ARM11 ? "VORBIS / ARM11" : "VORBIS / --";
+    }
+    if (view.info.format == OPENDSP_AUDIO_OPUS) {
+        if (view.backend == OPENDSP_AAC_BACKEND_DSP)
+            return "OPUS / DSP";
+        return view.backend == OPENDSP_AAC_BACKEND_ARM11 ? "OPUS / ARM11" : "OPUS / --";
+    }
     if (view.info.format == OPENDSP_AUDIO_MP3) {
         if (view.backend == OPENDSP_MP3_BACKEND_DSP)
             return "MP3 / DSP";
@@ -60,36 +85,90 @@ const char *monitor_backend(void)
     return "--";
 }
 
+static void sample_dsp(void)
+{
+    if (view.have_load && previous_have_load) {
+        u32 period = (view.load.period_ticks - previous_load.period_ticks) & OPENDSP_LOAD_MASK;
+        u32 mix = (view.load.mix_ticks - previous_load.mix_ticks) & OPENDSP_LOAD_MASK;
+        u32 codec = (view.load.codec_ticks - previous_load.codec_ticks) & OPENDSP_LOAD_MASK;
+        if (view.load.frames == previous_load.frames || !period)
+            return;
+        view.value[SERIES_DSP_MIX] = (float)mix / period;
+        view.value[SERIES_DSP_DECODE] = (float)codec / period;
+        view.value[SERIES_DSP_TOTAL] = ((float)mix + codec) / period;
+    } else if (view.have_dsp) {
+        // Older firmware: last frame only.
+        view.value[SERIES_DSP_TOTAL] = view.dsp.load;
+    }
+}
+
+static void sample_stream(u64 delta)
+{
+    bool same = view.have_stream && previous_stream && previous_backend == view.backend &&
+                previous_format == view.info.format && view.stream.read_ticks >= previous_read &&
+                view.stream.decode_ticks >= previous_decode;
+    if (!same)
+        return;
+    u64 read = view.stream.read_ticks - previous_read, work = view.stream.decode_ticks - previous_decode;
+    view.value[SERIES_SD_READ] = (float)((double)read / delta);
+    if (view.info.format == OPENDSP_AUDIO_WAV || view.backend != OPENDSP_AAC_BACKEND_ARM11)
+        return;
+    // Ogg decoders read inside ov_read.
+    if (view.info.format == OPENDSP_AUDIO_VORBIS || view.info.format == OPENDSP_AUDIO_OPUS)
+        work = work > read ? work - read : 0;
+    view.value[SERIES_CPU_DECODE] = (float)((double)work / delta);
+}
+
 bool monitor_update(u64 now)
 {
     if (view.held || (view.sampled_at && now - view.sampled_at < SYSCLOCK_ARM11 / 4))
         return false;
+    // Idle read where now was taken.
+    u32 idle;
+    bool cpu = cpu_meter_idle(&idle);
     view.dsp.struct_size = sizeof(view.dsp);
+    view.load.struct_size = sizeof(view.load);
     view.stream.struct_size = sizeof(view.stream);
     view.info.struct_size = sizeof(view.info);
     view.have_dsp = R_SUCCEEDED(opendspGetStats(&view.dsp, false));
-    view.have_stream = wav_playing() && wav_stream_info(&view.info) && wav_stats(&view.stream);
+    view.have_load = R_SUCCEEDED(opendspGetLoad(&view.load));
+    view.have_stream = wav_stream_info(&view.info) && wav_stats(&view.stream);
     view.backend = view.have_stream ? wav_active_backend() : OPENDSP_AAC_BACKEND_AUTO;
-    view.arm_decode = -1;
-    // Rebase after counter resets, decoder changes or suspension.
+    view.decoder.struct_size = sizeof(view.decoder);
+    view.have_decoder = view.have_stream && view.backend == OPENDSP_AAC_BACKEND_DSP &&
+                        wav_decoder_stats(&view.decoder);
+    // Cached loops stop the decoder.
+    view.loop_cached = view.have_stream && previous_stream && view.stream.loops &&
+                       view.stream.decoded_frames == previous_decoded;
+    for (unsigned i = 0; i < MONITOR_SERIES; ++i)
+        view.value[i] = -1;
+    // Rebase after counter resets or suspension.
     u64 delta = now - previous_tick;
-    if (primed && (now < previous_tick || delta > 2 * SYSCLOCK_ARM11)) {
+    bool valid = primed && now > previous_tick && delta <= 2 * SYSCLOCK_ARM11;
+    if (primed && !valid)
         view.head = view.count = 0;
-    }
-    if (primed && now > previous_tick && delta <= 2 * SYSCLOCK_ARM11) {
-        if (view.have_stream &&
-            (view.info.format == OPENDSP_AUDIO_AAC || view.info.format == OPENDSP_AUDIO_MP3) &&
-            view.backend == OPENDSP_AAC_BACKEND_ARM11 && previous_backend == view.backend &&
-            previous_format == view.info.format && view.stream.decode_ticks >= previous_decode)
-            view.arm_decode = (float)((double)(view.stream.decode_ticks - previous_decode) / delta);
+    if (valid) {
+        sample_dsp();
+        sample_stream(delta);
+        if (cpu && previous_cpu) {
+            float busy = 1 - (float)((double)(u32)(idle - previous_idle) / delta);
+            view.value[SERIES_CPU_TOTAL] = busy < 0 ? 0 : busy;
+        }
     }
     previous_tick = now;
+    previous_load = view.load;
+    previous_have_load = view.have_load;
+    previous_idle = idle;
+    previous_cpu = cpu;
+    previous_stream = view.have_stream;
     previous_decode = view.have_stream ? view.stream.decode_ticks : 0;
+    previous_read = view.have_stream ? view.stream.read_ticks : 0;
+    previous_decoded = view.have_stream ? view.stream.decoded_frames : 0;
     previous_backend = view.backend;
     previous_format = view.have_stream ? view.info.format : OPENDSP_AUDIO_WAV;
     primed = true;
-    view.dsp_history[view.head] = view.have_dsp ? view.dsp.load : -1;
-    view.arm_history[view.head] = view.arm_decode;
+    for (unsigned i = 0; i < MONITOR_SERIES; ++i)
+        view.history[i][view.head] = view.value[i];
     view.head = (view.head + 1) % MONITOR_HISTORY;
     if (view.count < MONITOR_HISTORY)
         ++view.count;
@@ -97,21 +176,15 @@ bool monitor_update(u64 now)
     return true;
 }
 
-static void meter(int y, float value, u32 color)
-{
-    gfx_rect(12, y, 376, 8, RGB(30, 42, 64));
-    if (isfinite(value) && value >= 0) {
-        if (value > 1)
-            value = 1;
-        gfx_rect(12, y, (int)(value * 376), 8, color);
-    }
-}
-static void plot(int y, const float *values, float limit, u32 color)
+#define CELL_W 188
+#define PLOT_H 54
+
+static void plot(int x, int y, const float *values, u32 color)
 {
     const u32 grid = RGB(38, 50, 75);
-    gfx_rect(12, y, 376, 52, RGB(18, 26, 44));
-    for (int i = 0; i < 3; ++i)
-        gfx_hline(12, y + i * 25, 376, grid);
+    gfx_rect(x, y, CELL_W, PLOT_H, RGB(18, 26, 44));
+    for (int i = 1; i < 4; ++i)
+        gfx_hline(x, y + i * PLOT_H / 4, CELL_W, grid);
     bool previous = false;
     int px = 0, py = 0;
     for (unsigned i = 0; i < view.count; ++i) {
@@ -121,45 +194,51 @@ static void plot(int y, const float *values, float limit, u32 color)
             previous = false;
             continue;
         }
-        if (v > limit)
-            v = limit;
-        int x = 12 + (MONITOR_HISTORY - view.count + i) * 375 / (MONITOR_HISTORY - 1);
-        int yy = y + 50 - (int)(v * 50 / limit);
+        if (v > 1)
+            v = 1;
+        int xx = x + (int)(MONITOR_HISTORY - view.count + i) * (CELL_W - 2) / (MONITOR_HISTORY - 1);
+        int yy = y + PLOT_H - 2 - (int)(v * (PLOT_H - 2));
         if (previous)
-            gfx_line(px, py, x, yy, color);
+            gfx_line(px, py, xx, yy, color);
         else
-            gfx_rect(x, yy, 2, 2, color);
-        px = x;
+            gfx_rect(xx, yy, 2, 2, color);
+        px = xx;
         py = yy;
         previous = true;
     }
 }
+
+static void cell(unsigned series, const char *name, int x, int y, u32 color)
+{
+    char text[16];
+    float v = view.value[series];
+    if (v >= 0)
+        snprintf(text, sizeof(text), "%.1f%%", v * 100);
+    else
+        snprintf(text, sizeof(text), "--");
+    gfx_text(x, y, name, RGB(235, 240, 255), 1);
+    gfx_text(x + CELL_W - gfx_text_width(text, 1), y, text, color, 1);
+    plot(x, y + 10, view.history[series], color);
+}
+
 void monitor_draw_top(void)
 {
-    const u32 cyan = RGB(80, 220, 255), orange = RGB(255, 170, 60), white = RGB(235, 240, 255);
-    char text[80];
+    const u32 cyan = RGB(80, 220, 255), orange = RGB(255, 170, 60), green = RGB(120, 230, 120);
+    const u32 pink = RGB(255, 110, 200), yellow = RGB(240, 220, 90), blue = RGB(150, 160, 255);
+    const u32 white = RGB(235, 240, 255);
     gfx_begin(RGB(10, 14, 30));
-    gfx_text(12, 8, "OPENDSP MONITOR", white, 2);
+    gfx_text(8, 5, "OPENDSP MONITOR", white, 2);
     if (view.held)
-        gfx_text(352, 12, "HOLD", orange, 1);
-    if (view.have_dsp)
-        snprintf(text, sizeof(text), "DSP %.1f%%  PEAK %.1f%%", view.dsp.load * 100, view.dsp.load_max * 100);
-    else
-        snprintf(text, sizeof(text), "DSP --");
-    gfx_text(12, 32, text, cyan, 1);
-    meter(43, view.have_dsp ? view.dsp.load : -1, cyan);
-    plot(57, view.dsp_history, 1.2f, cyan);
-    gfx_text(284, 59, "SCALE 0-120%", white, 1);
-    gfx_text(12, 119, "CPU DECODER (EST.)", white, 1);
-    if (view.arm_decode >= 0)
-        snprintf(text, sizeof(text), "%.1f%%", view.arm_decode * 100);
-    else
-        snprintf(text, sizeof(text), "%s",
-                 view.have_stream && view.backend == OPENDSP_AAC_BACKEND_DSP ? "INACTIVE" : "--");
-    gfx_text(12, 132, text, orange, 1);
-    meter(143, view.arm_decode, orange);
-    plot(157, view.arm_history, 1, orange);
-    gfx_text(284, 159, "SCALE 0-100%", white, 1);
-    gfx_text(12, 217, monitor_backend(), cyan, 1);
-    gfx_text(12, 230, "LAST 24 SECONDS", white, 1);
+        gfx_text(196, 10, "HOLD", orange, 1);
+    else if (view.loop_cached)
+        gfx_text(196, 10, "LOOP CACHE", orange, 1);
+    const char *backend = monitor_backend();
+    gfx_text(392 - gfx_text_width(backend, 1), 10, backend, cyan, 1);
+    // DSP left, ARM11 right; 0-100%, 24 s.
+    cell(SERIES_DSP_TOTAL, "DSP TOTAL", 8, 26, cyan);
+    cell(SERIES_DSP_DECODE, "DSP DECODER", 8, 96, orange);
+    cell(SERIES_DSP_MIX, "DSP MIX+FX", 8, 166, green);
+    cell(SERIES_CPU_TOTAL, "CPU CORE 0", 204, 26, pink);
+    cell(SERIES_CPU_DECODE, "CPU DECODER", 204, 96, yellow);
+    cell(SERIES_SD_READ, "SD READ WAIT", 204, 166, blue);
 }

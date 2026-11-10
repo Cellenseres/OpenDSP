@@ -6,6 +6,8 @@ ifeq ($(strip $(DEVKITARM)),)
 $(error Set DEVKITARM, e.g. export DEVKITARM=$$DEVKITPRO/devkitARM)
 endif
 TOPDIR ?= $(CURDIR)
+# 3ds_rules reads APP_ICON
+APP_ICON := $(TOPDIR)/meta/icon.png
 include $(DEVKITARM)/3ds_rules
 
 TARGET      := opendsp-soundlab
@@ -16,7 +18,6 @@ OPENDSP     := $(TOPDIR)/../../library
 APP_TITLE       := OpenDSP Sound Lab
 APP_DESCRIPTION := Music, sound effects and DSP demos on OpenDSP
 APP_AUTHOR      := Cellenseres
-ICON            := $(TOPDIR)/meta/icon.png
 MAKEROM         ?= makerom
 PYTHON          ?= python3
 
@@ -25,6 +26,11 @@ CFLAGS   := -g -Wall -O2 -mword-relocations -ffunction-sections $(ARCH) $(INCLUD
 LDFLAGS   = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 LIBS     := -lopendsp -lctru -lm
 LIBDIRS  := $(OPENDSP) $(CTRULIB)
+CODEC_BANKS ?= $(TOPDIR)/../../firmware/banked
+export CODEC_BANKS
+ifneq ($(strip $(CODEC_BANKS)),)
+CFLAGS += -DOPENDSP_CODEC_BANKS=1
+endif
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 
