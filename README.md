@@ -53,9 +53,16 @@ Vorbis and Opus decode on the DSP for most music, with ARM11 for the rest.
 Loop tags (LOOPSTART/LOOPEND) work for both. [OGG.md](docs/OGG.md) covers
 formats, backends and loops.
 
+## MSU-1
+
+Emulators and recompilations can hand their MSU-1 registers to OpenDSP with
+`<opendsp/msu1.h>`. Packs play as PCM, or as OPUZ or Ogg Opus at about a tenth
+of the size, decoded on the DSP. `tools/msu_convert.py` converts a PCM pack.
+See [MSU1.md](docs/MSU1.md).
+
 ## Sound Lab
 
-[Sound Lab](examples/soundlab) lets you try music, sound effects, WAV/AAC/MP3/Ogg files,
+[Sound Lab](examples/soundlab) lets you try music, sound effects, WAV/AAC/MP3/Ogg files, MSU-1 packs,
 filters and effects. The live monitor shows DSP load and the active decoder. Put your music in
 `sdmc:/3ds/opendsp-lab/` and press X in the player to switch decoders.
 

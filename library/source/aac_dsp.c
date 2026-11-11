@@ -60,6 +60,7 @@ static u32 quarantine_epoch;
 static Result codec_backend_allocate(aac_dsp_backend **out, u16 codec, u16 count, u16 frames, bool profile);
 #ifdef OPENDSP_CODEC_BANKS
 static Result ogg_connect_stream(aac_dsp_backend *d, u32 capabilities);
+static void release_idle(void);
 #endif
 
 static unsigned shared_bytes(const aac_dsp_backend *d)
@@ -290,6 +291,9 @@ static Result codec_backend_allocate(aac_dsp_backend **out, u16 codec, u16 count
         return OPENDSP_AAC_ERR_INVALID_ARG;
     *out = NULL;
     opendsp_aac_setup();
+#ifdef OPENDSP_CODEC_BANKS
+    release_idle();
+#endif
     LightLock_Lock(&owner_lock);
     if (quarantined && !sleeping_now() && (!dspIsComponentLoaded() || quarantine_epoch != current_generation())) {
         linearFree(quarantined);
@@ -896,4 +900,6 @@ Result mp3_backend_stages(aac_dsp_backend *d, u32 ticks[6])
 
 #ifdef OPENDSP_CODEC_BANKS
 #include "ogg_backend.inc"
+#else
+void aac_backend_release_idle(void) {}
 #endif

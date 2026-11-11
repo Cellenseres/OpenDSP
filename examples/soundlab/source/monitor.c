@@ -16,6 +16,12 @@ static bool previous_have_load, previous_cpu, previous_stream;
 static unsigned previous_backend;
 static opendspAudioFormat previous_format;
 static bool primed;
+static opendspAudioStream *(*other_source)(void);
+
+void monitor_set_source(opendspAudioStream *(*source)(void))
+{
+    other_source = source;
+}
 
 void monitor_reset(void)
 {
@@ -58,6 +64,13 @@ const char *monitor_backend(void)
         return "None";
     if (view.info.format == OPENDSP_AUDIO_WAV)
         return "PCM";
+    if (view.info.format == OPENDSP_AUDIO_MSU1)
+        return "MSU-1 PCM";
+    if (view.info.format == OPENDSP_AUDIO_OPUZ) {
+        if (view.backend == OPENDSP_AAC_BACKEND_DSP)
+            return "OPUZ / DSP";
+        return view.backend == OPENDSP_AAC_BACKEND_ARM11 ? "OPUZ / ARM11" : "OPUZ / --";
+    }
     if (view.info.format == OPENDSP_AUDIO_VORBIS) {
         if (view.backend == OPENDSP_AAC_BACKEND_DSP)
             return "VORBIS / DSP";
@@ -111,7 +124,8 @@ static void sample_stream(u64 delta)
         return;
     u64 read = view.stream.read_ticks - previous_read, work = view.stream.decode_ticks - previous_decode;
     view.value[SERIES_SD_READ] = (float)((double)read / delta);
-    if (view.info.format == OPENDSP_AUDIO_WAV || view.backend != OPENDSP_AAC_BACKEND_ARM11)
+    if (view.info.format == OPENDSP_AUDIO_WAV || view.info.format == OPENDSP_AUDIO_MSU1 ||
+        view.backend != OPENDSP_AAC_BACKEND_ARM11)
         return;
     // Ogg decoders read inside ov_read.
     if (view.info.format == OPENDSP_AUDIO_VORBIS || view.info.format == OPENDSP_AUDIO_OPUS)
@@ -133,6 +147,10 @@ bool monitor_update(u64 now)
     view.have_dsp = R_SUCCEEDED(opendspGetStats(&view.dsp, false));
     view.have_load = R_SUCCEEDED(opendspGetLoad(&view.load));
     view.have_stream = wav_stream_info(&view.info) && wav_stats(&view.stream);
+    opendspAudioStream *other = !view.have_stream && other_source ? other_source() : NULL;
+    if (other)
+        view.have_stream = R_SUCCEEDED(opendspAudioGetInfo(other, &view.info)) &&
+                           R_SUCCEEDED(opendspAudioGetStats(other, &view.stream));
     view.backend = view.have_stream ? wav_active_backend() : OPENDSP_AAC_BACKEND_AUTO;
     view.decoder.struct_size = sizeof(view.decoder);
     view.have_decoder = view.have_stream && view.backend == OPENDSP_AAC_BACKEND_DSP &&

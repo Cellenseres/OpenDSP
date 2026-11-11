@@ -46,16 +46,16 @@ build/codec-banks.config: FORCE
 	@cmp -s $@.tmp $@ || cp $@.tmp $@
 	@rm -f $@.tmp
 
-build/aac_dsp.o build/firmware.o build/audio/codec.o build/audio/ogg.o build/audio/vorbis.o build/audio/opus.o: build/codec-banks.config
-AUDIO_OBJECTS := $(addprefix build/audio/,input.o codec.o wav.o aac.o mp3.o mp3_arm11.o ogg.o ogg_alloc.o vorbis.o opus.o output.o engine.o)
+build/aac_dsp.o build/firmware.o build/audio/codec.o build/audio/ogg.o build/audio/vorbis.o build/audio/opus.o build/audio/opuz.o: build/codec-banks.config
+AUDIO_OBJECTS := $(addprefix build/audio/,input.o codec.o wav.o aac.o mp3.o mp3_arm11.o ogg.o ogg_alloc.o vorbis.o opus.o opuz.o output.o engine.o msu1.o)
 
 build/third_party/%.o: ../third_party/%.c ../third_party/opendsp_alloc.h ../third_party/audio-codecs.mk ../third_party/config/ogg/config_types.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(AUDIO_CODEC_FLAGS) -MMD -MP -fstack-usage -fno-strict-aliasing -Wno-unused-parameter -Wno-sign-compare -c $< -o $@
 
-build/audio/ogg.o build/audio/ogg_alloc.o build/audio/vorbis.o build/audio/opus.o: ../third_party/opendsp_alloc.h
+build/audio/ogg.o build/audio/ogg_alloc.o build/audio/vorbis.o build/audio/opus.o build/audio/opuz.o: ../third_party/opendsp_alloc.h
 build/audio/vorbis.o: ../third_party/tremor/ivorbisfile.h
-build/audio/ogg.o build/audio/ogg_alloc.o build/audio/vorbis.o build/audio/opus.o: CFLAGS += -fstack-usage
+build/audio/ogg.o build/audio/ogg_alloc.o build/audio/vorbis.o build/audio/opus.o build/audio/opuz.o: CFLAGS += -fstack-usage
 
 build/mp3_arm11.o: ../firmware/mp3/decoder.c ../firmware/mp3/decoder.h ../firmware/mp3/math.inc ../firmware/mp3/hybrid.inc ../firmware/mp3/tables.h ../firmware/hw.h
 build/mp3_arm11.o: CFLAGS += -fno-strict-aliasing

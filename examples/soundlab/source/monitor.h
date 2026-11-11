@@ -28,6 +28,8 @@ typedef struct {
     u64 sampled_at;
 } monitor_view;
 
+// Second stream when the file player is idle.
+void monitor_set_source(opendspAudioStream *(*source)(void));
 void monitor_reset(void);
 bool monitor_update(u64 now);
 void monitor_hold(void);

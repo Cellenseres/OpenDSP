@@ -115,6 +115,51 @@ Result ogg_backend_open(aac_dsp_backend **out, u16 channels)
     return codec_backend_allocate(out, 3, channels, 0, false);
 }
 
+/* One healthy Opus session outlives its stream. */
+static aac_dsp_backend *idle_opus;
+
+static aac_dsp_backend *take_idle(void)
+{
+    LightLock_Lock(&owner_lock);
+    aac_dsp_backend *decoder = idle_opus;
+    idle_opus = NULL;
+    LightLock_Unlock(&owner_lock);
+    return decoder;
+}
+
+static void release_idle(void)
+{
+    aac_backend_close(take_idle());
+}
+
+void aac_backend_release_idle(void)
+{
+    if (setup) release_idle();
+}
+
+void ogg_backend_park(aac_dsp_backend *decoder)
+{
+    if (!decoder) return;
+    LightLock_Lock(&owner_lock);
+    bool keep = !idle_opus && decoder->codec == 3 && !decoder->faulted && ogg_backend_context_valid(decoder);
+    if (keep) idle_opus = decoder;
+    LightLock_Unlock(&owner_lock);
+    if (!keep) aac_backend_close(decoder);
+}
+
+Result ogg_backend_reuse(aac_dsp_backend **out, u16 channels)
+{
+    if (!out || channels < 1 || channels > 2) return OPENDSP_AUDIO_ERR_ARGUMENT;
+    aac_dsp_backend *decoder = setup ? take_idle() : NULL;
+    if (decoder && decoder->ogg_channels == channels && !decoder->faulted && ogg_backend_context_valid(decoder) &&
+        R_SUCCEEDED(ogg_backend_reset(decoder, NULL, 0))) {
+        *out = decoder;
+        return 0;
+    }
+    aac_backend_close(decoder);
+    return ogg_backend_open(out, channels);
+}
+
 Result vorbis_backend_open(aac_dsp_backend **out, u16 channels)
 {
     if (!out || channels < 1 || channels > 2) return OPENDSP_AUDIO_ERR_ARGUMENT;

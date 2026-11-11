@@ -5,6 +5,7 @@
 #include "output.h"
 #include "../internal.h"
 #include "../codec_events.h"
+#include "../aac_backend.h"
 
 struct opendspAudioStream {
     LightLock lock;
@@ -625,6 +626,9 @@ Result opendspAudioExit(void)
         }
     set_flag(&ready, false);
     join_workers();
+#ifdef OPENDSP_CODEC_BANKS
+    aac_backend_release_idle();
+#endif
     if (hooked) {
         dspUnhook(&hook_cookie);
         hooked = false;
@@ -648,7 +652,7 @@ Result opendspAudioOpen(opendspAudioStream **out, const char *path, const opends
         (cfg.buffer_count && (cfg.buffer_count < 2 || cfg.buffer_count > 8)) ||
         (cfg.buffer_frames && (cfg.buffer_frames < 256 || cfg.buffer_frames > 16384)) ||
         cfg.aac_backend > OPENDSP_AAC_BACKEND_DSP ||
-        (cfg.flags & ~(OPENDSP_AUDIO_LOOP | OPENDSP_AUDIO_PROFILE)))
+        (cfg.flags & ~(OPENDSP_AUDIO_LOOP | OPENDSP_AUDIO_PROFILE | OPENDSP_AUDIO_MSU1_PCM)))
         return OPENDSP_AUDIO_ERR_ARGUMENT;
     LightLock_Lock(&lifecycle_lock);
     if (!flag(&ready) || flag(&sleeping)) {
@@ -686,12 +690,14 @@ Result opendspAudioOpen(opendspAudioStream **out, const char *path, const opends
         r = OPENDSP_AUDIO_ERR_FORMAT;
         goto fail;
     }
-    s->group = s->info.format != OPENDSP_AUDIO_WAV;
+    s->group = s->info.format != OPENDSP_AUDIO_WAV && s->info.format != OPENDSP_AUDIO_MSU1;
     u32 count = cfg.buffer_count     ? cfg.buffer_count
                 : s->codec.direct_pcm ? AUDIO_MP3_DSP_BUFFERS
                                       : 4;
     u32 frames = cfg.buffer_frames                       ? cfg.buffer_frames
-                 : s->info.format >= OPENDSP_AUDIO_VORBIS ? 4096
+                 : s->info.format == OPENDSP_AUDIO_VORBIS ? 4096
+                 : s->info.format == OPENDSP_AUDIO_OPUS   ? 4096
+                 : s->info.format == OPENDSP_AUDIO_OPUZ   ? 4096
                  : s->info.format == OPENDSP_AUDIO_MP3   ? 1152
                  : s->group                              ? 1024
                                                          : 2048;

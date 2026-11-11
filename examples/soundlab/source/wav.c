@@ -31,6 +31,11 @@ void opendsp_codec_diagnostic(const char *stage, Result result)
     fclose(log);
 }
 
+static bool pcm_format(opendspAudioFormat format)
+{
+    return format == OPENDSP_AUDIO_WAV || format == OPENDSP_AUDIO_MSU1;
+}
+
 static int cmp(const void *a, const void *b)
 {
     return strcasecmp(*(char *const *)a, *(char *const *)b);
@@ -53,7 +58,8 @@ int wav_scan(void)
         if (l > 4 && extension &&
             (!strcasecmp(extension, ".wav") || !strcasecmp(extension, ".aac") ||
              !strcasecmp(extension, ".mp3") || !strcasecmp(extension, ".ogg") ||
-             !strcasecmp(extension, ".oga") || !strcasecmp(extension, ".opus"))) {
+             !strcasecmp(extension, ".oga") || !strcasecmp(extension, ".opus") ||
+             !strcasecmp(extension, ".pcm") || !strcasecmp(extension, ".opuz"))) {
             char *name = strdup(e->d_name);
             if (name)
                 names[nfiles++] = name;
@@ -127,6 +133,9 @@ static bool play_backend(int i, unsigned backend, char *err, size_t errlen)
     cfg.channel = CH_WAV;
     cfg.aac_backend = backend;
     cfg.flags = looping ? OPENDSP_AUDIO_LOOP : 0;
+    const char *extension = strrchr(names[i], '.');
+    if (extension && !strcasecmp(extension, ".pcm"))
+        cfg.flags |= OPENDSP_AUDIO_MSU1_PCM;
     r = opendspAudioOpen(&stream, path, &cfg);
     if (R_FAILED(r))
         goto fail;
@@ -134,7 +143,7 @@ static bool play_backend(int i, unsigned backend, char *err, size_t errlen)
     r = opendspAudioGetInfo(stream, &fi);
     if (R_FAILED(r))
         goto fail;
-    if (fi.format != OPENDSP_AUDIO_WAV &&
+    if (!pcm_format(fi.format) &&
         backend != OPENDSP_AAC_BACKEND_AUTO && opendspAudioGetBackend(stream) != backend) {
         snprintf(stream_error, sizeof(stream_error), "Decoder unavailable (%u / %lu)", backend,
                  (unsigned long)opendspAudioGetBackend(stream));
@@ -153,6 +162,9 @@ static bool play_backend(int i, unsigned backend, char *err, size_t errlen)
             ? (opendspAudioGetBackend(stream) == OPENDSP_AAC_BACKEND_DSP ? "VORBIS / Teak DSP" : "VORBIS / ARM11")
         : fi.format == OPENDSP_AUDIO_OPUS
             ? (opendspAudioGetBackend(stream) == OPENDSP_AAC_BACKEND_DSP ? "OPUS / Teak DSP" : "OPUS / ARM11")
+        : fi.format == OPENDSP_AUDIO_OPUZ
+            ? (opendspAudioGetBackend(stream) == OPENDSP_AAC_BACKEND_DSP ? "OPUZ / Teak DSP" : "OPUZ / ARM11")
+        : fi.format == OPENDSP_AUDIO_MSU1 ? "MSU-1 PCM16"
         : fi.bits == 16 ? "PCM16"
                         : "PCM8");
     wav_apply();
@@ -252,11 +264,11 @@ bool wav_loop(void)
 {
     return looping;
 }
-const char *wav_status(void)
+const char *wav_state_name(opendspAudioStream *s)
 {
-    if (!stream)
+    if (!s)
         return "Stopped";
-    switch (opendspAudioGetState(stream)) {
+    switch (opendspAudioGetState(s)) {
     case OPENDSP_AUDIO_BUFFERING:
         return "Buffering";
     case OPENDSP_AUDIO_PLAYING:
@@ -272,6 +284,10 @@ const char *wav_status(void)
     default:
         return "Stopped";
     }
+}
+const char *wav_status(void)
+{
+    return wav_state_name(stream);
 }
 const char *wav_info(void)
 {
@@ -303,7 +319,7 @@ bool wav_set_backend(unsigned backend, char *error, size_t length)
         return false;
     }
     opendspAudioInfo fi = {.struct_size = sizeof(fi)};
-    if (wav_playing() && wav_stream_info(&fi) && fi.format != OPENDSP_AUDIO_WAV)
+    if (wav_playing() && wav_stream_info(&fi) && !pcm_format(fi.format))
         return wav_select_backend(backend, error, length);
     requested_backend = backend;
     stream_error[0] = 0;
@@ -339,7 +355,7 @@ bool wav_select_backend(unsigned backend, char *error, size_t length)
         return false;
     }
     opendspAudioInfo fi = {.struct_size = sizeof(fi)};
-    if (!wav_stream_info(&fi) || fi.format == OPENDSP_AUDIO_WAV)
+    if (!wav_stream_info(&fi) || pcm_format(fi.format))
         return wav_set_backend(backend, error, length);
     if (!opendspAudioSupportsBackend(fi.format, backend)) {
         snprintf(error, length, "%s decoder is unavailable",
@@ -371,6 +387,10 @@ bool wav_compare_backend(char *error, size_t length)
     return wav_select_backend(active == OPENDSP_AAC_BACKEND_DSP ? OPENDSP_AAC_BACKEND_ARM11
                                                                 : OPENDSP_AAC_BACKEND_DSP,
                               error, length);
+}
+bool wav_release(void)
+{
+    return close_stream();
 }
 void wav_exit(void)
 {

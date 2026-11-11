@@ -1,6 +1,6 @@
 # Streaming audio
 
-`<opendsp/audio.h>` plays WAV, AAC, MP3, Ogg Vorbis and Ogg Opus from SD or RomFS.
+`<opendsp/audio.h>` plays WAV, AAC, MP3, Ogg Vorbis, Ogg Opus and MSU-1 tracks from SD or RomFS.
 It reads files in the background, using bounded memory.
 
 ## Setup
@@ -47,6 +47,10 @@ Both codecs use that config field. See [MP3.md](MP3.md) for format limits.
 Vorbis and Opus run on DSP or ARM11 and share the WAV output path. See
 [OGG.md](OGG.md) for backends, loop tags and seeking.
 
+MSU-1 tracks play like WAV and loop from their header's loop point. OPUZ, the
+compressed MSU format of zelda3, plays like Opus. See [MSU1.md](MSU1.md) for
+headerless files, compressed packs and the register API.
+
 ## Controls
 
 Commands are asynchronous; check GetState and GetLastError. FINISHED means the
@@ -54,7 +58,7 @@ final queued PCM has played.
 
 - Pause retains the queue; Resume continues it. Play does nothing while active.
 - Stop cancels pending work and rewinds. Play restarts a finished or failed stream.
-- WAV, Vorbis and Opus Seek accept a PCM frame position and preserve pause/play
+- WAV, MSU-1, Vorbis and Opus Seek accept a PCM frame position and preserve pause/play
   state. On a stopped stream it sets the next starting position. AAC and MP3 only
   support Seek to zero.
 - SetLoop loops the tagged or API range, or the whole file. SetLoopRange and

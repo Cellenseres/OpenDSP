@@ -4,6 +4,7 @@
 #include "opendsp.h"
 #include "internal.h"
 #include "codec_events.h"
+#include "aac_backend.h"
 #include "extension.h"
 #include "sleep.h"
 
@@ -82,6 +83,7 @@ void opendspExit(void)
 {
     if (opendsp_audio_before_exit)
         opendsp_audio_before_exit();
+    aac_backend_release_idle();
     opendsp_codec_events_stop();
     ndspExit();
     opendsp_running = false;

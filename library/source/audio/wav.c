@@ -129,3 +129,42 @@ Result opendsp_audio_wav_open(audio_codec *c)
     c->info.total_frames = w.bytes / w.frame_bytes;
     return wav_seek(c, 0);
 }
+
+Result opendsp_audio_msu1_open(audio_codec *c, bool raw)
+{
+    u8 h[8];
+    size_t got;
+    Result r = opendsp_audio_input_read(&c->in, h, sizeof(h), &got);
+    if (R_FAILED(r))
+        return r;
+    bool header = got >= 4 && !memcmp(h, "MSU1", 4);
+    if (!header && !raw)
+        return OPENDSP_AUDIO_ERR_FORMAT;
+    if (header && got < sizeof(h))
+        return OPENDSP_AUDIO_ERR_TRUNCATED;
+    wav_data w = {header ? sizeof(h) : 0, 0, 4};
+    w.bytes = (c->in.size - w.offset) / 4 * 4;
+    c->data = malloc(sizeof(w));
+    if (!c->data)
+        return OPENDSP_AUDIO_ERR_MEMORY;
+    memcpy(c->data, &w, sizeof(w));
+    c->memory = sizeof(w);
+    c->ops = &wav_ops;
+    c->info.format = OPENDSP_AUDIO_MSU1;
+    c->info.sample_rate = 44100;
+    c->info.channels = 2;
+    c->info.bits = 16;
+    c->info.duration_known = true;
+    c->seekable = true;
+    c->info.total_frames = w.bytes / 4;
+    // Out-of-range loop points restart the track.
+    u32 start = header ? rd32(h + 4) : 0;
+    if (c->info.total_frames) {
+        c->loop.available = true;
+        c->loop.from_tags = true;
+        c->loop.start_frame = start < c->info.total_frames ? start : 0;
+        c->loop.end_frame = c->info.total_frames;
+        c->loop.status = OPENDSP_AUDIO_LOOP_VALID;
+    }
+    return wav_seek(c, 0);
+}

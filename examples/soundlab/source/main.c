@@ -7,6 +7,7 @@
 #include <math.h>
 #include "audio.h"
 #include "wav.h"
+#include "msu.h"
 #include "gfx.h"
 #include "cpu.h"
 #include "monitor.h"
@@ -57,14 +58,14 @@ static void hints(const char *h)
     printf("\x1b[29;1H" C_HINT "%-39.39s" C_RESET, h);
 }
 
-enum { P_MAIN, P_MUSIC, P_SFX, P_WAV, P_KEYS, P_FX, P_VERB, P_LAB, P_MONITOR, P_ABOUT, P_COUNT };
+enum { P_MAIN, P_MUSIC, P_SFX, P_WAV, P_MSU, P_KEYS, P_FX, P_VERB, P_LAB, P_MONITOR, P_ABOUT, P_COUNT };
 static int page = P_MAIN, cursor[P_COUNT], items;
 static bool dirty = true, quit;
 static char message[80];
 
-static const char *main_items[] = {"Music",   "Sound effects", "Files",        "Keyboard", "Mixer",
-                                   "Effects", "DSP lab",       "Live monitor", "About",    "Exit"};
-#define MAIN_ITEMS 10
+static const char *main_items[] = {"Music",   "Sound effects", "Files",        "MSU-1", "Keyboard", "Mixer",
+                                   "Effects", "DSP lab",       "Live monitor", "About", "Exit"};
+#define MAIN_ITEMS 11
 
 static const char *on_off(bool b)
 {
@@ -121,7 +122,7 @@ static void draw_wav(void)
         item(3, cursor[page] == 0, "Rescan SD card", "");
         line(7, "  No audio files found.");
         line(9, C_DIM "  SD:/3ds/opendsp-lab/");
-        line(10, C_DIM "  WAV, AAC, MP3, Ogg Vorbis/Opus");
+        line(10, C_DIM "  WAV, AAC, MP3, Ogg, MSU-1, OPUZ");
         hints(" A rescan   B back");
         return;
     }
@@ -227,7 +228,7 @@ static void draw_monitor(void)
         line(14, "  Underruns   " C_DIM "--");
         line(15, "  Worker peak " C_DIM "--");
     }
-    line(20, "  Playback    %s", wav_status());
+    line(20, "  Playback    %s", msu_stream() ? wav_state_name(msu_stream()) : wav_status());
     if (m->held)
         line(21, C_DIM "  Display paused");
     line(24, C_DIM "  Decoder changes restart playback.");
@@ -372,6 +373,7 @@ static void adjust_verb(int index, int delta, int big)
     }
     audio_apply_effects();
     wav_apply();
+    msu_apply();
 }
 
 static void draw_lab(void)
@@ -412,6 +414,48 @@ static void draw_about(void)
     hints(" B back");
 }
 
+static void draw_msu(void)
+{
+    char v[40];
+    header("MSU-1");
+    if (!msu_ready()) {
+        items = 1;
+        item(3, cursor[page] == 0, "Rescan SD card", "");
+        line(7, "  No MSU-1 pack found.");
+        line(9, C_DIM "  SD:/3ds/opendsp-lab/msu/");
+        line(10, C_DIM "  <name>-<N>.pcm/.opuz/.opus");
+        hints(" A rescan   B back");
+        return;
+    }
+    items = 7;
+    snprintf(v, sizeof v, "%s %d", msu_track_present(msu_track()) ? "" : "missing", msu_track());
+    item(3, cursor[page] == 0, "Track (A load)", v);
+    item(4, cursor[page] == 1, "Play / pause", msu_playing() ? "playing" : "");
+    item(5, cursor[page] == 2, "Repeat", on_off(msu_repeat()));
+    snprintf(v, sizeof v, "%d", msu_volume());
+    item(6, cursor[page] == 3, "Volume", v);
+    item(7, cursor[page] == 4, "Fade out", "");
+    item(8, cursor[page] == 5, "Stop and bookmark", "");
+    item(9, cursor[page] == 6, "Reset", "");
+    line(11, C_DIM "  %.36s", msu_pack());
+    line(12, C_DIM "  %s", msu_codec());
+    u8 status = msu_status();
+    char id[7];
+    msu_id(id);
+    line(13, "  $2000 " C_VAL "%02X" C_RESET "  ID " C_VAL "%s" C_RESET "  rev %d", status, id, status & 7);
+    line(14, "  %s  %s  %s", status & 0x10 ? C_OK "PLAY" C_RESET : C_DIM "play" C_RESET,
+         status & 0x20 ? C_OK "REPEAT" C_RESET : C_DIM "repeat" C_RESET,
+         status & 0x08 ? C_WARN "ERROR" C_RESET : C_DIM "error" C_RESET);
+    float position, length, loop;
+    if (msu_times(&position, &length, &loop)) {
+        line(16, "  %d:%02d / %d:%02d", (int)position / 60, (int)position % 60, (int)length / 60,
+             (int)length % 60);
+        if (loop >= 0)
+            line(17, C_DIM "  Loops from %d:%02d", (int)loop / 60, (int)loop % 60);
+    }
+    hints(" A select  </> track  L/R any  B back");
+}
+
 static void draw_bottom(void)
 {
     consoleSelect(&bottom);
@@ -428,6 +472,9 @@ static void draw_bottom(void)
         break;
     case P_WAV:
         draw_wav();
+        break;
+    case P_MSU:
+        draw_msu();
         break;
     case P_KEYS:
         draw_keys();
@@ -487,6 +534,7 @@ static void adjust_fx(int index, int delta, int big)
     }
     audio_apply_settings();
     wav_apply();
+    msu_apply();
 }
 
 static void go(int p)
@@ -567,6 +615,8 @@ static void input(void)
     if (down & KEY_SELECT) {
         stop_all();
         wav_stop();
+        if (msu_playing())
+            msu_play_pause();
         dirty = true;
     }
     if (page == P_KEYS) {
@@ -606,17 +656,21 @@ static void input(void)
     switch (page) {
     case P_MAIN:
         if (down & KEY_A) {
-            static const int pages[MAIN_ITEMS - 1] = {P_MUSIC, P_SFX, P_WAV,     P_KEYS, P_FX,
-                                                      P_VERB,  P_LAB, P_MONITOR, P_ABOUT};
+            static const int pages[MAIN_ITEMS - 1] = {P_MUSIC, P_SFX, P_WAV,     P_MSU,  P_KEYS,
+                                                      P_FX,    P_VERB, P_LAB, P_MONITOR, P_ABOUT};
             if (*c == MAIN_ITEMS - 1) {
                 quit = true;
                 return;
             }
             if (pages[*c] != P_MONITOR)
                 ui_blip(1);
-            if (pages[*c] == P_WAV)
+            if (pages[*c] == P_WAV) {
+                msu_close();
                 wav_scan();
+            }
             go(pages[*c]);
+            if (pages[*c] == P_MSU && !msu_ready())
+                msu_open(message, sizeof message);
         }
         break;
     case P_MUSIC:
@@ -638,6 +692,7 @@ static void input(void)
         if (delta && *c == 2) {
             S.speed = clamp_int(S.speed + delta * (big ? 25 : 5), 50, 200);
             wav_apply();
+            msu_apply();
             dirty = true;
         }
         break;
@@ -695,6 +750,40 @@ static void input(void)
                     message[0] = 0;
                 audio_apply_settings();
             }
+            dirty = true;
+        }
+        break;
+    case P_MSU:
+        if (!msu_ready()) {
+            if (down & KEY_A) {
+                ui_blip(1);
+                msu_open(message, sizeof message);
+                dirty = true;
+            }
+            break;
+        }
+        if (*c == 0 && (repeat & (KEY_DLEFT | KEY_DRIGHT | KEY_L | KEY_R))) {
+            msu_step_track(delta, (repeat & (KEY_L | KEY_R)) != 0);
+            dirty = true;
+        }
+        if (*c == 3 && delta) {
+            msu_set_volume(msu_volume() + delta * (big ? 32 : 8));
+            dirty = true;
+        }
+        if (down & KEY_A) {
+            ui_blip(1);
+            if (*c == 0)
+                msu_load();
+            else if (*c == 1)
+                msu_play_pause();
+            else if (*c == 2)
+                msu_toggle_repeat();
+            else if (*c == 4)
+                msu_fade();
+            else if (*c == 5)
+                msu_stop_bookmark();
+            else if (*c == 6)
+                msu_reset();
             dirty = true;
         }
         break;
@@ -851,6 +940,8 @@ static void draw_top(void)
     else if (music_is_playing())
         snprintf(b, sizeof b, "NOW: TEAK STREET  %d BPM  BAR %d  %s", music_bpm(), music_bar() + 1,
                  music_chord());
+    else if (msu_playing())
+        snprintf(b, sizeof b, "NOW: MSU-1 TRACK %d", msu_track());
     else if (wav_playing())
         snprintf(b, sizeof b, "NOW: %s", wav_info());
     else
@@ -883,6 +974,7 @@ int main(void)
         return 0;
     }
     wav_scan();
+    monitor_set_source(msu_stream);
 
     u64 last_refresh = 0, last_top_refresh = 0;
     while (aptMainLoop() && !quit) {
@@ -892,7 +984,9 @@ int main(void)
         u64 now = osGetTime();
         if (page == P_MONITOR && monitor_update(svcGetSystemTick()))
             dirty = true;
-        if ((page == P_MUSIC || page == P_WAV || page == P_LAB) && now - last_refresh >= 250) {
+        msu_update();
+        if ((page == P_MUSIC || page == P_WAV || page == P_MSU || page == P_LAB) &&
+            now - last_refresh >= 250) {
             dirty = true;
             last_refresh = now;
         }
@@ -914,6 +1008,7 @@ int main(void)
     }
     cpu_meter_stop();
     stop_all();
+    msu_close();
     wav_exit();
     audio_exit();
     gfxExit();

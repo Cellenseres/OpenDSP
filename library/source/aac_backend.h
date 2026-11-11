@@ -17,6 +17,7 @@ u32 opendsp_aac_memory(const opendspAacDecoder *decoder);
 Result mp3_backend_stages(aac_dsp_backend *d, u32 ticks[6]);
 void opendsp_aac_setup(void);
 void opendsp_aac_release(void);
+void aac_backend_release_idle(void); // closes a parked Opus session
 
 /* Internal asynchronous MP3 transport. PCM slots are part of the quarantinable
  * arena and lent to NDSP; ARM never reads, copies or flushes their contents. */

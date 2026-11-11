@@ -185,7 +185,7 @@ static void opus_close(audio_codec *c)
     if (!o)
         return;
 #ifdef OPENDSP_CODEC_BANKS
-    aac_backend_close(o->dsp);
+    ogg_backend_park(o->dsp);
 #endif
     opendsp_audio_ogg_enter(&o->io.memory);
     if (!o->io.memory.failed) {
@@ -243,7 +243,7 @@ Result opendsp_audio_opus_open(audio_codec *c, const audio_loop_tags *tags, u32 
     opendsp_audio_ogg_leave();
 #ifdef OPENDSP_CODEC_BANKS
     if (backend == OPENDSP_AAC_BACKEND_DSP || (backend == OPENDSP_AAC_BACKEND_AUTO && auto_uses_dsp(c, o))) {
-        Result result = ogg_backend_open(&o->dsp, c->info.channels);
+        Result result = ogg_backend_reuse(&o->dsp, c->info.channels);
         // AUTO keeps the ARM11 decoder.
         if (R_FAILED(result) && backend == OPENDSP_AAC_BACKEND_DSP) return result;
         if (R_FAILED(result)) o->dsp = NULL;
