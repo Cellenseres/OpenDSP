@@ -13,7 +13,7 @@
 #include <opendsp.h>
 #include <opendsp/aac.h>
 
-#define APP_VERSION "1.2.2"
+#define APP_VERSION "1.3.0"
 
 static PrintConsole bottom;
 
