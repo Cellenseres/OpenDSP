@@ -1,4 +1,4 @@
-# Sound Lab 1.3.0
+# Sound Lab 1.3.1
 
 Install `opendsp-soundlab.cia` to add or update Sound Lab. For the Homebrew
 Launcher, copy the 3DSX and SMDH files.
@@ -8,9 +8,13 @@ AAC, MP3 and most Vorbis and Opus files use DSP by default; X in the player
 switches to ARM11. The live monitor shows DSP load for decoding and mixing,
 CPU core 0 and SD reads.
 
+MSU-1 packs go to `sdmc:/3ds/opendsp-lab/msu/`, as PCM, OPUZ or Ogg Opus. The
+MSU-1 page drives the registers like an emulator would.
+
 Ogg loops follow LOOPSTART/LOOPEND tags. MP3 supports MPEG-1 Layer III at 32,
 44.1 and 48 kHz, mono/stereo, up to 320 kbit/s. AAC supports mono/stereo
 AAC-LC ADTS at 8-48 kHz, with one block per frame.
 
 The firmware is built in. See [AAC formats](../../docs/AAC.md),
-[MP3 formats](../../docs/MP3.md) and [Ogg playback](../../docs/OGG.md).
+[MP3 formats](../../docs/MP3.md), [Ogg playback](../../docs/OGG.md) and
+[MSU-1](../../docs/MSU1.md).

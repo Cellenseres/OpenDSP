@@ -58,8 +58,8 @@ cia: all
 	bannertool makebanner -i meta/banner.png -a meta/banner.wav -o $(BUILD)/banner.bnr
 	$(MAKEROM) -f cia -o $(TARGET).cia -target t -exefslogo -rsf meta/soundlab.rsf \
 		-elf $(TARGET).elf -icon $(TARGET).smdh -banner $(BUILD)/banner.bnr \
-		-ver 1072
-	$(PYTHON) ../../tools/check_cia.py $(TARGET).cia 1.3.0
+		-ver 1073
+	$(PYTHON) ../../tools/check_cia.py $(TARGET).cia 1.3.1
 
 clean:
 	@rm -rf $(BUILD) $(TARGET).3dsx $(TARGET).smdh $(TARGET).elf $(TARGET).cia
