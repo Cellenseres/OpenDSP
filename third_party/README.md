@@ -26,7 +26,9 @@ per stream and 16 MiB in total.
 Opus has Teak additions behind `TEAK_KERNELS`, `OPUS_WORD_STORAGE`,
 `OPUS_DECODER_ONLY` and `OPUS_DSP_PACKET_INPUT`; the ARM11 build leaves them off. opusfile adds
 `op_decode_generation()` and Tremor adds `ov_set_decode_callback()` and
-`ov_decode_generation()` for the DSP backends.
+`ov_decode_generation()` for the DSP backends. Tremor's `ov_pcm_seek_page()`
+also sets the decoder up afresh after a failed seek, so a cancelled seek can be
+retried.
 
 `SHA256SUMS` covers every vendored file, including these changes:
 

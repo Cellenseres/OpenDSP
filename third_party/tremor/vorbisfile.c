@@ -1604,8 +1604,10 @@ int ov_pcm_seek_page(OggVorbis_File *vf,ogg_int64_t pos){
 
         vf->pcm_offset=total;
 
-        if(link!=vf->current_link){
-          /* Different link; dump entire decode machine */
+        if(link!=vf->current_link || vf->ready_state<STREAMSET){
+          /* Different link, or a machine a failed seek dumped (left
+             OPENED, which a restart alone keeps): dump entire decode
+             machine */
           _decode_clear(vf);
 
           vf->current_link=link;
@@ -1637,8 +1639,10 @@ int ov_pcm_seek_page(OggVorbis_File *vf,ogg_int64_t pos){
       result=_get_next_page(vf,&og,-1);
       if(result<0) goto seek_error;
 
-      if(link!=vf->current_link){
-        /* Different link; dump entire decode machine */
+      if(link!=vf->current_link || vf->ready_state<STREAMSET){
+        /* Different link, or a machine a failed seek dumped (left
+           OPENED, which a restart alone keeps): dump entire decode
+           machine */
         _decode_clear(vf);
 
         vf->current_link=link;
