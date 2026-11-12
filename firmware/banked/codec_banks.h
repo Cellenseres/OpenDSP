@@ -9,9 +9,9 @@ typedef struct { uint32_t word_address, offset, bytes; } codec_data_source;
 #define CODEC_AAC_BANK 0x4u
 #define CODEC_MP3_BANK 0x5u
 #define CODEC_PAYLOAD_BYTES 0x70b00u
-#define CODEC_IMAGE_TAG0 0x474f53a7u
-#define CODEC_IMAGE_TAG1 0xaab6807cu
-#define CODEC_IMAGE_SHA256 "44d6c331b1fa391613dcfe4f8b748b2fc9681a712dcb77e22568f0d3814da5c4"
+#define CODEC_IMAGE_TAG0 0x7afb299bu
+#define CODEC_IMAGE_TAG1 0x8d800434u
+#define CODEC_IMAGE_SHA256 "6c2384d0fbb02364d16edad82ab10d43a92b7cb8d7cffcaa3a69366735d96765"
 static const codec_bank_source codec_banks[CODEC_BANK_COUNT] = {
     {0x0u, 0x35cu},
     {0x380u, 0x7290u},

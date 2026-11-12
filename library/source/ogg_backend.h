@@ -15,6 +15,8 @@ Result vorbis_backend_send(aac_dsp_backend *decoder, const void *packet, size_t 
 Result vorbis_backend_receive(aac_dsp_backend *decoder, s16 *pcm, u16 capacity, u16 *frames,
                               const u32 *generation, u32 expected);
 bool ogg_backend_context_valid(const aac_dsp_backend *decoder);
+/* True after a wakeup; ogg_backend_reset reconnects. */
+bool ogg_backend_recoverable(const aac_dsp_backend *decoder);
 Result ogg_backend_reset(aac_dsp_backend *decoder, const u32 *generation, u32 expected);
 Result ogg_backend_decode(aac_dsp_backend *decoder, const void *packet, size_t bytes, s16 *pcm,
                           u16 frames, s16 gain, const u32 *generation, u32 expected);

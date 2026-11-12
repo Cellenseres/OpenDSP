@@ -5,6 +5,8 @@
 
 static u16 current_bank = 0xffff, required_bank = 0xffff;
 static ogg_code_loader loader;
+// Spare command word; open_stream clears it.
+#define OVERLAY_SESSION ((vu16 *)(OGG_DECODE_WORD + 31))
 #ifdef OPENDSP_CELT_SHARED
 extern const u16 ogg_celt_prefix_bytes;
 #endif
@@ -21,6 +23,12 @@ u16 overlay_enter(u16 wanted)
     const vu16 *descriptor = (void *)(OGG_OVERLAY_DIRECTORY + wanted * 4u);
     u16 previous = required_bank;
     u32 source, bytes;
+    // New session: a cancelled task may have stopped mid-load.
+    if (!*OVERLAY_SESSION) {
+        current_bank = 0xffff;
+        loader.arena_end = 0;
+        *OVERLAY_SESSION = 1;
+    }
     required_bank = wanted;
     if (wanted == 0xffff || wanted == current_bank) return previous;
     if (wanted >= config[4]) goto failed;

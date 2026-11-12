@@ -13,8 +13,9 @@ typedef struct opendspMsu1 opendspMsu1;
 typedef struct {
     u32 struct_size;
     s32 channel; // Reserved by opendspAudioInit, or AUTO
+    u32 backend; // OPENDSP_AAC_BACKEND_*, for compressed tracks
 } opendspMsu1Config;
-#define OPENDSP_MSU1_CONFIG_INIT {sizeof(opendspMsu1Config), OPENDSP_AUDIO_CHANNEL_AUTO}
+#define OPENDSP_MSU1_CONFIG_INIT {sizeof(opendspMsu1Config), OPENDSP_AUDIO_CHANNEL_AUTO, OPENDSP_AAC_BACKEND_AUTO}
 
 // Call these on the main thread, like opendspAudioOpen.
 // pack is a path prefix or a directory with one pack.

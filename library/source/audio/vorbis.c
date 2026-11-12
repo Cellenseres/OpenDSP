@@ -180,7 +180,10 @@ static Result vorbis_seek(audio_codec *c, u64 frame)
     if (frame > c->info.total_frames)
         return OPENDSP_AUDIO_ERR_ARGUMENT;
 #ifdef OPENDSP_CODEC_BANKS
-    if (v->dsp && !ogg_backend_context_valid(v->dsp)) return OPENDSP_AUDIO_ERR_CONTEXT;
+    if (v->dsp && !ogg_backend_context_valid(v->dsp)) {
+        if (!ogg_backend_recoverable(v->dsp)) return OPENDSP_AUDIO_ERR_CONTEXT;
+        v->dsp_faulted = true;
+    }
 #endif
     v->io.error = 0;
     AUDIO_OGG_ENTER(&v->io);
@@ -202,7 +205,10 @@ static Result vorbis_read(audio_codec *c, void *out, u32 capacity, u32 *frames)
     vorbis_data *v = c->data;
     *frames = 0;
 #ifdef OPENDSP_CODEC_BANKS
-    if (v->dsp && !ogg_backend_context_valid(v->dsp)) return OPENDSP_AUDIO_ERR_CONTEXT;
+    if (v->dsp && !ogg_backend_context_valid(v->dsp)) {
+        if (!ogg_backend_recoverable(v->dsp)) return OPENDSP_AUDIO_ERR_CONTEXT;
+        v->dsp_faulted = true;
+    }
 #endif
     if (v->io.memory.failed)
         return OPENDSP_AUDIO_ERR_MEMORY;

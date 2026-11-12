@@ -10,6 +10,13 @@ bool ogg_backend_context_valid(const aac_dsp_backend *decoder)
            decoder->wakeups == __atomic_load_n(&wakeups, __ATOMIC_ACQUIRE);
 }
 
+// A wakeup ended the session; reset reopens it.
+bool ogg_backend_recoverable(const aac_dsp_backend *decoder)
+{
+    return decoder && decoder->codec >= 3 && decoder->codec <= 4 && opendsp_running && !sleeping_now() &&
+           dspIsComponentLoaded() && !ogg_backend_context_valid(decoder);
+}
+
 #define OGG_EVENT_WAIT_NS 20000000LL
 
 static bool ogg_cancelled(const u32 *generation, u32 expected)
@@ -24,7 +31,6 @@ static Result ogg_wait_result(aac_dsp_backend *decoder, const u32 *generation, u
     bool events = decoder->ogg_events && opendsp_codec_events_active();
     for (;;) {
         if (!ogg_backend_context_valid(decoder)) return OPENDSP_AUDIO_ERR_CONTEXT;
-        if (ogg_cancelled(generation, expected)) return OPENDSP_AUDIO_ERR_STATE;
         bool done = events && opendsp_mailbox_peek(OGG_DONE_WORD) == decoder->sequence;
         if (done) {
             // Published before the ticket.
@@ -36,7 +42,9 @@ static Result ogg_wait_result(aac_dsp_backend *decoder, const u32 *generation, u
             Result result = done ? 0 : opendsp_request(OGG_CMD_STATUS, args, 1, reply, 8);
             if (R_FAILED(result)) return result;
             if (reply[0] != decoder->sequence || reply[1] == OGG_STATE_FAILED) return OPENDSP_ERR_ADDRESS;
-            if (reply[1] == OGG_STATE_DONE) return 0;
+            // A cancelled job still runs to the end.
+            if (reply[1] == OGG_STATE_DONE)
+                return ogg_cancelled(generation, expected) ? OPENDSP_AUDIO_ERR_STATE : 0;
             if (reply[1] != OGG_STATE_BUSY) return OPENDSP_ERR_ARGUMENT;
         }
         u64 now = svcGetSystemTick();
@@ -58,11 +66,14 @@ static Result ogg_submit(aac_dsp_backend *decoder, u16 command, u16 bytes, u16 f
     u16 args[6] = {decoder->session, decoder->sequence, bytes, frames, 0, (u16)gain};
     Result result = opendsp_request(command, args, 6, NULL, 0);
     if (R_SUCCEEDED(result)) result = ogg_wait_result(decoder, generation, expected, reply);
+    if (result == OPENDSP_AUDIO_ERR_STATE) {
+        // Vorbis reconnects; Opus takes the INIT reset.
+        if (decoder->codec == 4) decoder->faulted = true;
+        return result;
+    }
     if (R_FAILED(result)) {
-        // Seek, stop or switch is not a decoder fault.
-        if (!ogg_cancelled(generation, expected))
-            opendsp_codec_error(decoder->codec == 4 ? "Vorbis control" :
-                                command == OGG_CMD_INIT ? "Opus init" : "Opus decode", result);
+        opendsp_codec_error(decoder->codec == 4 ? "Vorbis control" :
+                            command == OGG_CMD_INIT ? "Opus init" : "Opus decode", result);
         decoder->faulted = true;
         return result;
     }
@@ -171,10 +182,13 @@ Result ogg_backend_reset(aac_dsp_backend *decoder, const u32 *generation, u32 ex
     if (!decoder || decoder->codec < 3 || decoder->codec > 4) return OPENDSP_AUDIO_ERR_ARGUMENT;
     LightLock_Lock(&owner_lock);
     Result result;
-    if (!ogg_backend_context_valid(decoder)) result = OPENDSP_AUDIO_ERR_CONTEXT;
-    else if (decoder->faulted) {
+    bool lost = ogg_backend_recoverable(decoder);
+    if (!lost && !ogg_backend_context_valid(decoder)) result = OPENDSP_AUDIO_ERR_CONTEXT;
+    else if (decoder->faulted || lost) {
         u16 args[1] = {decoder->session};
         result = opendsp_request(OGG_CMD_CLOSE, args, 1, NULL, 0);
+        // A reloaded DSP no longer knows the session.
+        if (lost) result = 0;
         if (R_SUCCEEDED(result)) {
             decoder->connected = false;
             u32 capabilities = 0;
@@ -216,7 +230,7 @@ static Result vorbis_receive(aac_dsp_backend *decoder, Result result, s16 *pcm, 
     u16 reply[8];
     if (R_SUCCEEDED(result)) result = ogg_wait_result(decoder, generation, expected, reply);
     if (R_FAILED(result)) {
-        if (!ogg_cancelled(generation, expected)) opendsp_codec_error("Vorbis decode", result);
+        if (result != OPENDSP_AUDIO_ERR_STATE) opendsp_codec_error("Vorbis decode", result);
         decoder->faulted = true;
         return result;
     }

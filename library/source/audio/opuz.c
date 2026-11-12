@@ -117,8 +117,11 @@ static Result decode_next(audio_codec *c, opuz_data *o)
     u64 begin = svcGetSystemTick();
 #ifdef OPENDSP_CODEC_BANKS
     if (o->dsp) {
-        if (!ogg_backend_context_valid(o->dsp))
-            return OPENDSP_AUDIO_ERR_CONTEXT;
+        if (!ogg_backend_context_valid(o->dsp)) {
+            if (!ogg_backend_recoverable(o->dsp))
+                return OPENDSP_AUDIO_ERR_CONTEXT;
+            o->fresh = true;
+        }
         if (o->fresh)
             r = ogg_backend_reset(o->dsp, c->in.generation, c->in.expected);
         if (R_SUCCEEDED(r))

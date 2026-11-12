@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: BSD-2-Clause
 #include <dirent.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <opendsp/msu1.h>
+#include "codec.h"
 
 #define MSU1_REVISION 2
 enum { STATUS_REPEAT = 0x20, STATUS_PLAY = 0x10, STATUS_ERROR = 0x08 };
@@ -14,6 +16,7 @@ struct opendspMsu1 {
     char *prefix, *path;
     size_t path_bytes;
     s32 channel;
+    u32 backend;
     opendspAudioStream *stream, *retired;
     FILE *data;
     u32 data_seek;
@@ -104,10 +107,11 @@ static char *find_pack(const char *directory)
     return prefix;
 }
 
+// Status reads poll this, so it never waits.
 static void retry_retired(opendspMsu1 *m)
 {
     if (m->retired)
-        opendspAudioClose(&m->retired);
+        opendsp_audio_close_poll(&m->retired);
 }
 
 static bool release(opendspMsu1 *m)
@@ -118,11 +122,25 @@ static bool release(opendspMsu1 *m)
     opendspAudioStop(m->stream);
     if (R_SUCCEEDED(opendspAudioClose(&m->stream)))
         return true;
-    if (m->retired)
+    // Room for one stream still closing.
+    if (m->retired && R_FAILED(opendspAudioClose(&m->retired)))
         return false;
     m->retired = m->stream;
     m->stream = NULL;
     return true;
+}
+
+static Result open_track(opendspMsu1 *m, opendspAudioConfig *config)
+{
+    config->channel = m->channel;
+    config->aac_backend = m->backend;
+    Result r = opendspAudioOpen(&m->stream, m->path, config);
+    // A retired stream may still hold the channel.
+    if (r == OPENDSP_AUDIO_ERR_BUSY && m->retired && m->channel >= 0) {
+        config->channel = -1;
+        r = opendspAudioOpen(&m->stream, m->path, config);
+    }
+    return r;
 }
 
 static void load_track(opendspMsu1 *m)
@@ -132,13 +150,12 @@ static void load_track(opendspMsu1 *m)
     if (!release(m))
         return;
     opendspAudioConfig config = OPENDSP_AUDIO_CONFIG_INIT;
-    config.channel = m->channel;
     bool opened = false;
     for (unsigned i = 0; i < KINDS && !opened; ++i) {
         unsigned kind = (m->kind + i) % KINDS;
         snprintf(m->path, m->path_bytes, "%s-%u%s", m->prefix, (unsigned)m->track, kinds[kind]);
         config.flags = kind ? 0 : OPENDSP_AUDIO_MSU1_PCM;
-        opened = R_SUCCEEDED(opendspAudioOpen(&m->stream, m->path, &config));
+        opened = R_SUCCEEDED(open_track(m, &config));
         if (opened)
             m->kind = (u8)kind;
     }
@@ -176,16 +193,18 @@ Result opendspMsu1Open(opendspMsu1 **out, const char *pack, const opendspMsu1Con
     *out = NULL;
     opendspMsu1Config cfg = OPENDSP_MSU1_CONFIG_INIT;
     if (config) {
-        if (config->struct_size < sizeof(cfg))
+        // Older callers end before backend.
+        if (config->struct_size < offsetof(opendspMsu1Config, backend))
             return OPENDSP_AUDIO_ERR_ARGUMENT;
-        cfg = *config;
+        memcpy(&cfg, config, config->struct_size < sizeof(cfg) ? config->struct_size : sizeof(cfg));
     }
-    if (!pack || !*pack || cfg.channel < -1 || cfg.channel >= 24)
+    if (!pack || !*pack || cfg.channel < -1 || cfg.channel >= 24 || cfg.backend > OPENDSP_AAC_BACKEND_DSP)
         return OPENDSP_AUDIO_ERR_ARGUMENT;
     opendspMsu1 *m = calloc(1, sizeof(*m));
     if (!m)
         return OPENDSP_AUDIO_ERR_MEMORY;
     m->channel = cfg.channel;
+    m->backend = cfg.backend;
     struct stat info;
     if (!stat(pack, &info) && S_ISDIR(info.st_mode)) {
         m->prefix = find_pack(pack);

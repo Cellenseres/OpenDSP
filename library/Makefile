@@ -77,7 +77,7 @@ build/firmware.o: source/firmware.s $(FIRMWARE) ../firmware/aac_tables.bin $(MP3
 	@mkdir -p build
 	$(CC) $(ARCH) -x assembler-with-cpp -Wa,-I,$(dir $(FIRMWARE)) $(BANK_ASFLAGS) -Wa,-I,$(dir $(MP3_TABLES)) -c source/firmware.s -o $@
 
-lib/libopendsp.a: build/opendsp.o build/embedded.o build/firmware.o build/mailbox.o build/codec_events.o build/effects.o $(AAC_OBJECTS) $(AUDIO_OBJECTS) $(CODEC_OBJECTS)
+lib/libopendsp.a: build/opendsp.o build/ndsp_bounded.o build/embedded.o build/firmware.o build/mailbox.o build/codec_events.o build/effects.o $(AAC_OBJECTS) $(AUDIO_OBJECTS) $(CODEC_OBJECTS)
 	@mkdir -p lib
 	rm -f $@
 	$(AR) rcs $@ $^

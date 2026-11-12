@@ -95,6 +95,8 @@ the volume to 0.
 `opendspMsu1SetMix()` routes every track, for example to
 [reverb and delay](GUIDE.md#reverb-and-delay); volume scales that mix.
 `opendspMsu1GetStream()` returns the current stream for stats and position.
+`config.backend` picks the decoder for OPUZ and Ogg tracks: `OPENDSP_AAC_BACKEND_AUTO`,
+`_ARM11` or `_DSP`.
 
 Run the MSU-1 calls on the main thread, like `opendspAudioOpen()`. Track
 selection opens the file synchronously. PCM and OPUZ open in a few

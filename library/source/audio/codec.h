@@ -56,6 +56,8 @@ struct audio_codec {
 Result opendsp_audio_codec_open(audio_codec *c, const char *path, u32 backend, u32 count, u32 frames,
                                 u32 flags);
 void opendsp_audio_codec_close(audio_codec *c);
+// Close without waiting; BUSY while the DSP still plays it.
+Result opendsp_audio_close_poll(opendspAudioStream **handle);
 Result opendsp_audio_wav_open(audio_codec *c);
 Result opendsp_audio_msu1_open(audio_codec *c, bool raw);
 Result opendsp_audio_opuz_open(audio_codec *c, u32 backend);

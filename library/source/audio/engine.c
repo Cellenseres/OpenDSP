@@ -83,12 +83,14 @@ static void dsp_event(DSP_HookType type)
 {
     if (type == DSPHOOK_ONSLEEP) {
         set_flag(&sleeping, true);
+        // A stuck worker must not block sleep.
+        u64 start = svcGetSystemTick();
         for (;;) {
             unsigned active = 0;
             LightLock_Lock(&registry_lock);
             for (unsigned i = 0; i < 24; ++i) if (streams[i]) active += streams[i]->refs;
             LightLock_Unlock(&registry_lock);
-            if (!active) break;
+            if (!active || svcGetSystemTick() - start >= 3ull * SYSCLOCK_ARM11) break;
             svcSleepThread(500000);
         }
     }
@@ -806,7 +808,7 @@ Result opendspAudioSeek(opendspAudioStream *s, u64 frame)
     return command(s, AUDIO_SEEK, frame);
 }
 
-Result opendspAudioClose(opendspAudioStream **handle)
+static Result close_within(opendspAudioStream **handle, u64 timeout)
 {
     if (!handle)
         return OPENDSP_AUDIO_ERR_ARGUMENT;
@@ -817,10 +819,12 @@ Result opendspAudioClose(opendspAudioStream **handle)
         return OPENDSP_AUDIO_ERR_BUSY;
     LightLock_Lock(&registry_lock);
     LightLock_Lock(&s->lock);
-    s->closing = true;
-    s->play = false;
-    s->state = OPENDSP_AUDIO_STOPPING;
-    cancel(s);
+    if (!s->closing) {
+        s->closing = true;
+        s->play = false;
+        s->state = OPENDSP_AUDIO_STOPPING;
+        cancel(s);
+    }
     __atomic_fetch_and(&worker_channels[s->group], ~(1u << s->output.channel), __ATOMIC_RELEASE);
     LightLock_Unlock(&s->lock);
     LightLock_Unlock(&registry_lock);
@@ -835,7 +839,7 @@ Result opendspAudioClose(opendspAudioStream **handle)
             if (opendsp_audio_output_fenced(&s->output, current_epoch(), flag(&shutdown_complete)))
                 break;
         }
-        if (svcGetSystemTick() - start >= SYSCLOCK_ARM11) {
+        if (svcGetSystemTick() - start >= timeout) {
             LightLock_Unlock(&lifecycle_lock);
             return OPENDSP_AUDIO_ERR_BUSY;
         }
@@ -844,6 +848,8 @@ Result opendspAudioClose(opendspAudioStream **handle)
     opendsp_audio_codec_close(&s->codec);
     opendsp_audio_output_close(&s->output);
     free(s->loop_pcm);
+    // The next stream inherits this mix, unscaled.
+    ndspChnSetMix(s->output.channel, s->mix);
     LightLock_Lock(&registry_lock);
     streams[s->output.channel] = NULL;
     LightLock_Unlock(&registry_lock);
@@ -851,6 +857,16 @@ Result opendspAudioClose(opendspAudioStream **handle)
     *handle = NULL;
     LightLock_Unlock(&lifecycle_lock);
     return 0;
+}
+
+Result opendspAudioClose(opendspAudioStream **handle)
+{
+    return close_within(handle, SYSCLOCK_ARM11);
+}
+
+Result opendsp_audio_close_poll(opendspAudioStream **handle)
+{
+    return close_within(handle, 0);
 }
 
 Result opendspAudioSetLoop(opendspAudioStream *s, bool loop)

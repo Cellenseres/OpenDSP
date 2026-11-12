@@ -76,6 +76,7 @@ see [BUILDING.md](docs/BUILDING.md) if you want to change it.
 
 BSD 2-Clause. Include the copyright notice and license text when distributing OpenDSP.
 The bundled Ogg codecs keep their BSD-style licenses; see [third_party](third_party/README.md).
+`library/source/ndsp_bounded.c` and `ndsp-internal.h` come from libctru and keep its zlib license.
 
 Made by Cellenseres. Thanks to Gericom for teak-llvm, wwylele for teakra,
 and the devkitPro and libctru developers.

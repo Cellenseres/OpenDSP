@@ -114,7 +114,10 @@ static Result opus_seek(audio_codec *c, u64 frame)
 {
     opus_data *o = c->data;
 #ifdef OPENDSP_CODEC_BANKS
-    if (o->dsp && !ogg_backend_context_valid(o->dsp)) return OPENDSP_AUDIO_ERR_CONTEXT;
+    if (o->dsp && !ogg_backend_context_valid(o->dsp)) {
+        if (!ogg_backend_recoverable(o->dsp)) return OPENDSP_AUDIO_ERR_CONTEXT;
+        o->dsp_faulted = true;
+    }
 #endif
     if (o->io.memory.failed)
         return OPENDSP_AUDIO_ERR_MEMORY;
@@ -149,7 +152,10 @@ static Result opus_read(audio_codec *c, void *out, u32 capacity, u32 *frames)
     opus_data *o = c->data;
     *frames = 0;
 #ifdef OPENDSP_CODEC_BANKS
-    if (o->dsp && !ogg_backend_context_valid(o->dsp)) return OPENDSP_AUDIO_ERR_CONTEXT;
+    if (o->dsp && !ogg_backend_context_valid(o->dsp)) {
+        if (!ogg_backend_recoverable(o->dsp)) return OPENDSP_AUDIO_ERR_CONTEXT;
+        o->dsp_faulted = true;
+    }
 #endif
     if (o->io.memory.failed)
         return OPENDSP_AUDIO_ERR_MEMORY;
